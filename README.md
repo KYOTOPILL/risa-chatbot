@@ -1,6 +1,6 @@
 # Office RAG Chatbot
 
-Local Thai chatbot over office documents. Answers in Thai from the indexed documents only, says "not found" plus the HR contact otherwise, and hands over a file only when asked and only if it is marked downloadable.
+Local Thai chatbot (FastAPI backend + plain HTML/CSS/JS page in `web/`) over office documents. Answers in Thai from the indexed documents only, says "not found" plus the HR contact otherwise, and hands over a file only when asked and only if it is marked downloadable.
 
 Design: `docs/superpowers/specs/`. Plan: `docs/superpowers/plans/`.
 
@@ -23,9 +23,9 @@ Put **only documents every staff member may see** in `content/` (path set by `CO
 ## Run
 ```
 .venv/bin/python ingest.py          # build or refresh the index (re-run after files change)
-.venv/bin/streamlit run app.py      # chat page
+.venv/bin/uvicorn server:app --port 8000   # chat page at http://localhost:8000
 ```
-Server later: same code, add `--server.address 0.0.0.0` to expose on the office LAN. Change models in `config.py` (`CHAT_MODEL`, `EMBED_MODEL`) and the HR contact in `HR_CONTACT` (placeholder now).
+Server later: same code, add `--host 0.0.0.0` to expose on the office LAN. Restart the server after changing `config.py`. Change models in `config.py` (`CHAT_MODEL`, `EMBED_MODEL`) and the HR contact in `HR_CONTACT` (placeholder now).
 
 ## Check correctness
 ```

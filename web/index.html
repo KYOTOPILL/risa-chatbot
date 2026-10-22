@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RiSA ผู้ช่วยสำนักงาน</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="mark">RiSA</span><span class="sub">ผู้ช่วยสำนักงาน</span></div>
+    <button id="new" class="ghost" type="button">เริ่มแชทใหม่</button>
+  </header>
+
+  <main id="log" class="log" aria-live="polite">
+    <section id="welcome" class="welcome">
+      <h1>สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ</h1>
+      <p>ถามเรื่องนโยบาย เอกสาร หรือความคืบหน้าของงานได้เลย</p>
+      <div class="chips">
+        <button type="button" class="chip">ลาพักร้อนได้กี่วันต่อปี</button>
+        <button type="button" class="chip">ขอแบบฟอร์มเบิกค่าใช้จ่าย</button>
+        <button type="button" class="chip">โครงการ Alpha คืบหน้าเท่าไหร่</button>
+      </div>
+    </section>
+  </main>
+
+  <form id="form" class="composer" autocomplete="off">
+    <textarea id="input" rows="1" maxlength="2000" placeholder="พิมพ์คำถามของคุณ" aria-label="พิมพ์คำถามของคุณ"></textarea>
+    <button id="send" type="submit" aria-label="ส่ง">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" fill="currentColor"/></svg>
+    </button>
+  </form>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
