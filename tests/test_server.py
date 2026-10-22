@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import rag
 import server
+import state
 
 
 class FakeStore:
@@ -13,7 +14,7 @@ class FakeStore:
 
 @pytest.fixture
 def client():
-    with patch.object(server, "get_store", return_value=FakeStore()):
+    with patch.object(state, "get_store", return_value=FakeStore()):
         yield TestClient(server.app)
 
 

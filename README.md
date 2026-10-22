@@ -27,6 +27,9 @@ Put **only documents every staff member may see** in `content/` (path set by `CO
 ```
 Server later: same code, add `--host 0.0.0.0` to expose on the office LAN. Restart the server after changing `config.py`. Change models in `config.py` (`CHAT_MODEL`, `EMBED_MODEL`) and the HR contact in `HR_CONTACT` (placeholder now).
 
+## Manage files (admin page)
+Open http://localhost:8000/admin on the server machine to upload files (pick a category, tick "downloadable" to put them in `shareable/`), delete files, and re-index. Uploads and deletes re-index automatically; chat waits during re-indexing. Same-name uploads replace the old file. This page works only from the server machine itself (loopback); add real login before exposing it to the LAN.
+
 ## Check correctness
 ```
 .venv/bin/pytest                          # unit tests, no Ollama needed

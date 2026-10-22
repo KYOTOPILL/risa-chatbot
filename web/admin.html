@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RiSA จัดการเอกสาร</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+<div class="adm">
+  <header class="top">
+    <div class="brand"><span class="mark">RiSA</span><span class="sub">จัดการเอกสาร</span></div>
+    <a class="ghost" href="/">ไปหน้าแชท</a>
+  </header>
+
+  <section class="card">
+    <h2>อัปโหลดเอกสาร</h2>
+    <form id="up">
+      <label class="drop" id="drop">
+        <input id="files" type="file" multiple accept=".pdf,.docx,.txt,.md">
+        <span id="picked">ลากไฟล์มาวาง หรือคลิกเพื่อเลือก (PDF, DOCX, TXT, MD)</span>
+      </label>
+      <div class="row">
+        <label>หมวดหมู่
+          <input id="category" list="cats" maxlength="60" placeholder="เช่น policy, forms (เว้นว่าง = general)">
+          <datalist id="cats"></datalist>
+        </label>
+        <label class="check"><input id="dl" type="checkbox"> ให้ดาวน์โหลดผ่านแชทได้</label>
+        <button class="primary" id="go" type="submit">อัปโหลด</button>
+      </div>
+    </form>
+    <p id="msg" class="status" role="status"></p>
+  </section>
+
+  <section class="card">
+    <div class="between">
+      <h2>เอกสารทั้งหมด <span id="count" class="muted"></span></h2>
+      <button class="ghost" id="reindex" type="button">อัปเดตดัชนีใหม่</button>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>ไฟล์</th><th>หมวดหมู่</th><th>ดาวน์โหลด</th><th>ขนาด</th><th>แก้ไข</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="muted hidden">ยังไม่มีเอกสาร</p>
+  </section>
+</div>
+<script src="/static/admin.js"></script>
+</body>
+</html>

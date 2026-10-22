@@ -1,0 +1,25 @@
+.adm { max-width: 960px; margin: 0 auto; padding: 0 16px 40px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin-top: 18px; }
+.card h2 { margin: 0 0 12px; font-size: 1.1rem; }
+.muted { color: var(--muted); font-weight: 400; font-size: .9rem; }
+.between { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+a.ghost { text-decoration: none; }
+.drop { display: block; border: 2px dashed var(--line); border-radius: 14px; padding: 26px 16px; text-align: center; color: var(--muted); cursor: pointer; }
+.drop.over, .drop:hover { border-color: var(--accent); color: var(--accent); }
+.drop input { display: none; }
+.row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 14px; }
+.row label { display: flex; flex-direction: column; gap: 4px; font-size: .9rem; color: var(--muted); flex: 1 1 220px; }
+.row label.check { flex-direction: row; align-items: center; gap: 8px; flex: 0 0 auto; color: var(--text); }
+.row input[type=text], .row input:not([type]) { padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+.primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px; padding: 11px 22px; font: inherit; cursor: pointer; }
+.primary:disabled, .ghost:disabled { opacity: .5; cursor: not-allowed; }
+.status { min-height: 1.4em; margin: 12px 0 0; }
+.status.err { color: var(--err); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td:first-child { white-space: normal; overflow-wrap: anywhere; }
+th { color: var(--muted); font-weight: 600; font-size: .85rem; }
+.badge { display: inline-block; padding: 1px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: .85rem; }
+.del { background: none; border: 0; color: var(--err); cursor: pointer; font: inherit; }
+.del:hover { text-decoration: underline; }
