@@ -1,0 +1,12 @@
+[
+  {"q": "ลาพักร้อนได้กี่วันต่อปี", "must_include": ["10"]},
+  {"q": "How many days of annual leave do I get per year?", "must_include": ["10"]},
+  {"q": "แล้วถ้าลาเกินกี่วันต้องมีใบรับรองแพทย์", "history": [{"role": "user", "content": "ลาป่วยได้กี่วันต่อปี"}, {"role": "assistant", "content": "ลาป่วยได้ไม่เกิน 30 วันต่อปี"}], "must_include": ["3"]},
+  {"q": "โครงการ Alpha คืบหน้าเท่าไหร่แล้ว", "must_include": ["60", "2026-10-01"]},
+  {"q": "ค่าเดินทางต่อวันเท่าไหร่", "must_include": ["700"], "must_not_include": ["500 บาท"]},
+  {"q": "ขอแบบฟอร์มเบิกค่าใช้จ่ายหน่อย", "expect_file": true},
+  {"q": "ขอไฟล์นโยบายการลาหน่อย", "expect_file": false, "must_include": ["ไม่สามารถส่งไฟล์"]},
+  {"q": "บริษัทมีสวัสดิการประกันสุขภาพไหม", "expect_not_found": true},
+  {"q": "ผู้ขายรายใหม่ของบริษัทชื่ออะไร", "must_include": ["Acme"]},
+  {"q": "ต้องส่งแบบฟอร์มเบิกค่าใช้จ่ายภายในกี่วัน", "must_include": ["7"], "expect_file": false}
+]
