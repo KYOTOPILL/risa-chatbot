@@ -37,4 +37,4 @@ Tuning knobs in `config.py`: `CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `MAX_DISTAN
 
 ## Notes
 - PDF extraction uses `pymupdf` (AGPL, fine for internal use); it read Thai from the mock PDF. Re-check with the real Thai files.
-- Not yet verified against real models: eval results, tuned thresholds, Thai answer quality, and multi-user latency. Run the evals and load test once Ollama is installed, then record the final values here.
+- Live results (Mac M5, 16GB, `qwen3:8b` + `bge-m3`, mock content): `python -m evals.run_eval` passes 10/10; first question took ~12s including model load. Not yet measured: multi-user latency (`evals.load_test`) and quality on real Thai documents. `qwen3:8b` is the placeholder tag; settings in `config.py` are untuned beyond the mock set.

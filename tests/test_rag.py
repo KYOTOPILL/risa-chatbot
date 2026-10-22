@@ -14,15 +14,15 @@ def hit(doc_id="d1", text="ลาพักร้อน 10 วัน", downloadab
 
 
 class FakeStore:
-    def __init__(self, hits):
-        self.hits, self.queries = hits, []
+    def __init__(self, hits, by_category=None):
+        self.hits, self.by_category, self.queries = hits, by_category or {}, []
 
     def query(self, question, k, category=None):
         self.queries.append((question, category))
-        return self.hits
+        return self.by_category.get(category, self.hits)
 
     def categories(self):
-        return ["policy", "forms"]
+        return ["policy", "forms", "general"]
 
 
 class FakeLLM:
@@ -144,3 +144,26 @@ def test_chat_disables_thinking_and_strips_think_block(monkeypatch):
     monkeypatch.setattr(rag.ollama, "chat", fake_chat)
     assert rag.chat([{"role": "user", "content": "x"}]) == "ตอบเป็นไทย"
     assert seen["think"] is False
+
+
+def test_prompt_does_not_number_documents_and_limits_dates():
+    llm = FakeLLM([THAI_OK])
+    answer([], "คำถาม", FakeStore([hit()]), llm=llm)
+    system, user = llm.calls[-1][0][0]["content"], llm.calls[-1][0][-1]["content"]
+    assert "เอกสารที่" not in user
+    assert "Never refer to documents by number" in system
+    assert "ข้อมูล ณ วันที่" in system
+
+
+def test_model_not_found_marker_becomes_hr_message():
+    r = answer([], "คำถาม", FakeStore([hit()]), llm=FakeLLM(["NOT_FOUND"]))
+    assert r.text == rag.NOT_FOUND and HR_CONTACT in r.text
+
+
+def test_wrong_category_does_not_hide_better_hits():
+    weak, strong = hit("w", text="WEAKTEXT", distance=0.55), hit("s", text="STRONGTEXT", distance=0.2)
+    llm = FakeLLM([THAI_OK], intent={"question": "q", "wants_file": False, "category": "general"})
+    store = FakeStore([strong, weak], by_category={"general": [weak]})
+    answer([], "q", store, llm=llm)
+    prompt = llm.calls[-1][0][-1]["content"]
+    assert "STRONGTEXT" in prompt and prompt.index("STRONGTEXT") < prompt.index("WEAKTEXT")
