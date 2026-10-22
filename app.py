@@ -9,6 +9,9 @@ from config import CONTENT_DIR
 from store import Store
 
 log = logging.getLogger("chatbot")
+if not log.handlers:  # streamlit leaves the root logger unconfigured; answer sources go here
+    log.addHandler(logging.StreamHandler())
+log.setLevel(logging.INFO)
 
 
 @st.cache_resource
@@ -37,13 +40,18 @@ for n, m in enumerate(msgs):
 if prompt := st.chat_input("พิมพ์คำถามของคุณ"):
     if prompt.strip():
         history = [rag.Turn(m["role"], m["content"]) for m in msgs]
-        msgs.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         with st.chat_message("assistant"):
-            with st.spinner("กำลังค้นหาข้อมูล..."), lock:
-                reply = rag.answer(history, prompt, store)
+            try:
+                with st.spinner("กำลังค้นหาข้อมูล..."), lock:
+                    reply = rag.answer(history, prompt, store)
+            except Exception:
+                log.exception("answer failed")
+                st.error("ขออภัย ระบบขัดข้อง กรุณาลองใหม่อีกครั้งหรือติดต่อผู้ดูแลระบบ")
+                st.stop()
             log.info("q=%r sources=%s", prompt, reply.sources)
             st.markdown(reply.text)
-            show_files(reply.file_doc_ids, store, f"n{len(msgs)}")
+            show_files(reply.file_doc_ids, store, f"n{len(msgs) + 1}")
+        msgs.append({"role": "user", "content": prompt})
         msgs.append({"role": "assistant", "content": reply.text, "files": reply.file_doc_ids})

@@ -29,17 +29,24 @@ class Store:
     def __init__(self, index_dir: Path = INDEX_DIR, embed_fn=embed):
         self._client = chromadb.PersistentClient(path=str(index_dir))
         self._embed = embed_fn
-        self._col = self._client.get_or_create_collection(COLLECTION, metadata={"hnsw:space": "cosine"})
+
+    @property
+    def _col(self):
+        # looked up each time: another process (ingest) may have replaced the collection
+        return self._client.get_or_create_collection(COLLECTION, metadata={"hnsw:space": "cosine"})
 
     def replace_all(self, items: list[tuple[DocMeta, list[str]]]) -> None:
+        # embed everything first so a failure (Ollama down) leaves the old index intact
+        # file name is embedded with the chunk so name-style queries match; it is never shown to staff
+        embedded = [
+            (meta, chunks, self._embed([f"{meta.rel_path}\n{c}" for c in chunks]))
+            for meta, chunks in items if chunks
+        ]
+        self._col  # create if first run, so delete below cannot fail
         self._client.delete_collection(COLLECTION)
-        self._col = self._client.create_collection(COLLECTION, metadata={"hnsw:space": "cosine"})
-        for meta, chunks in items:
-            if not chunks:
-                continue
-            # file name is embedded with the chunk so name-style queries match; it is never shown to staff
-            vectors = self._embed([f"{meta.rel_path}\n{c}" for c in chunks])
-            self._col.add(
+        col = self._col
+        for meta, chunks, vectors in embedded:
+            col.add(
                 ids=[f"{meta.doc_id}:{i}" for i in range(len(chunks))],
                 documents=chunks,
                 embeddings=vectors,

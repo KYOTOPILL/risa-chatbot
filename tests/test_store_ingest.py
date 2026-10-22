@@ -78,3 +78,26 @@ def test_categories_lists_indexed_categories(tmp_path):
     content, store = make(tmp_path)
     build_index(content, store)
     assert store.categories() == ["forms", "policy"]
+
+
+def test_second_store_instance_survives_reingest_by_other_instance(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+    other = Store(tmp_path / "index", embed_fn=fake_embed)
+    build_index(content, other)
+    assert store.query("annual leave", k=1) and store.categories() and store.doc_path("nope") is None
+
+
+def test_failed_reingest_keeps_old_index(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+
+    def boom(texts):
+        raise RuntimeError("ollama down")
+
+    broken = Store(tmp_path / "index", embed_fn=boom)
+    try:
+        build_index(content, broken)
+    except RuntimeError:
+        pass
+    assert store.query("annual leave", k=1)

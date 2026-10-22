@@ -63,7 +63,7 @@ def test_english_then_thai_uses_regenerated_reply():
 
 
 def test_wants_file_returns_only_downloadable_doc_ids():
-    hits = [hit("a", downloadable=False, distance=0.1), hit("b", downloadable=True, distance=0.3)]
+    hits = [hit("a", downloadable=False, distance=0.1), hit("b", downloadable=True, distance=0.2)]
     llm = FakeLLM([THAI_OK], intent={"question": "ขอแบบฟอร์ม", "wants_file": True, "category": None})
     r = answer([], "ขอแบบฟอร์ม", FakeStore(hits), llm=llm)
     assert r.file_doc_ids == ["b"]
@@ -125,3 +125,22 @@ def test_is_mostly_thai():
     assert is_mostly_thai("ลาพักร้อนผ่านระบบ HR และ SAP ได้เลย")
     assert not is_mostly_thai("You can take ten days of annual leave per year.")
     assert not is_mostly_thai("")
+
+
+def test_file_request_for_nondownloadable_ignores_far_downloadable_hit():
+    hits = [hit("a", downloadable=False, distance=0.10), hit("b", downloadable=True, distance=0.50)]
+    llm = FakeLLM([THAI_OK], intent={"question": "q", "wants_file": True, "category": None})
+    r = answer([], "ขอไฟล์นโยบายการลา", FakeStore(hits), llm=llm)
+    assert r.file_doc_ids == [] and rag.CANNOT_SEND in r.text
+
+
+def test_chat_disables_thinking_and_strips_think_block(monkeypatch):
+    seen = {}
+
+    def fake_chat(**kw):
+        seen.update(kw)
+        return {"message": {"content": "<think>reasoning in English</think>\nตอบเป็นไทย"}}
+
+    monkeypatch.setattr(rag.ollama, "chat", fake_chat)
+    assert rag.chat([{"role": "user", "content": "x"}]) == "ตอบเป็นไทย"
+    assert seen["think"] is False

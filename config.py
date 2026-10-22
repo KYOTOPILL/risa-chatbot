@@ -11,7 +11,8 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 TOP_K = 5
 MAX_DISTANCE = 0.6  # cosine distance; tune with evals
-THAI_MIN_RATIO = 0.5
+THAI_MIN_RATIO = 0.5  # ponytail: char-ratio heuristic lets a half-Thai reply through; use a language detector if it matters
+FILE_MARGIN = 0.15  # downloadable doc must be this close to the best hit; tune with evals
 
 HR_CONTACT = "ฝ่ายทรัพยากรบุคคล (HR) อีเมล hr@example.com"  # placeholder
 SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md"}

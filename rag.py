@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import ollama
 
-from config import CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
+from config import CHAT_MODEL, FILE_MARGIN, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
 
 NOT_FOUND = f"ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร กรุณาติดต่อ {HR_CONTACT}"
 CANNOT_SEND = "ขออภัย ไม่สามารถส่งไฟล์นี้ให้ได้ค่ะ"
@@ -48,8 +48,8 @@ class Reply:
 
 
 def chat(messages: list[dict], json_mode: bool = False) -> str:
-    res = ollama.chat(model=CHAT_MODEL, messages=messages, format="json" if json_mode else None)
-    return res["message"]["content"]
+    res = ollama.chat(model=CHAT_MODEL, messages=messages, format="json" if json_mode else None, think=False)
+    return re.sub(r"<think>.*?</think>", "", res["message"]["content"], flags=re.S).strip()
 
 
 def is_mostly_thai(text: str) -> bool:
@@ -105,8 +105,9 @@ def answer(history: list[Turn], message: str, store, llm=chat) -> Reply:
     extra = ""
     if intent.wants_file:
         best = {}
+        top = min(h.distance for h in hits)
         for h in hits:
-            if h.downloadable:
+            if h.downloadable and h.distance - top <= FILE_MARGIN:
                 best.setdefault(h.doc_id, h)
         close = [d for d, h in best.items() if h.distance - min(x.distance for x in best.values()) <= TIE_MARGIN]
         if len(close) == 1:

@@ -79,3 +79,19 @@ def test_no_file_name_in_rendered_page(tmp_path):
         at.chat_input[0].set_value("ขอแบบฟอร์ม").run()
         rendered = " ".join(str(e.value) for e in at.markdown) + " ".join(str(b.proto.label) for b in at.get("download_button"))
         assert "secret-form" not in rendered
+
+
+def test_source_logging_is_enabled():
+    import logging
+
+    with patch("store.Store", FakeStore), patch("rag.answer", return_value=rag.Reply("ตอบ")):
+        new_app()
+    assert logging.getLogger("chatbot").getEffectiveLevel() <= logging.INFO
+
+
+def test_ollama_error_shows_thai_message_and_no_dangling_turn():
+    with patch("store.Store", FakeStore), patch("rag.answer", side_effect=RuntimeError("ollama down")):
+        at = new_app()
+        at.chat_input[0].set_value("ลากี่วัน").run()
+        assert len(at.error) == 1
+        assert at.session_state["msgs"] == []
