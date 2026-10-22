@@ -62,6 +62,9 @@ class Store:
             for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0])
         ]
 
+    def categories(self) -> list[str]:
+        return sorted({m["category"] for m in self._col.get(include=["metadatas"])["metadatas"]})
+
     def doc_path(self, doc_id: str) -> str | None:
         res = self._col.get(where={"doc_id": doc_id}, limit=1)
         return res["metadatas"][0]["rel_path"] if res["metadatas"] else None

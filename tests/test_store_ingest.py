@@ -72,3 +72,9 @@ def test_metadata_roundtrip_and_doc_path(tmp_path):
     assert len(h.mtime) == 10 and h.text and 0 <= h.distance <= 2
     assert store.doc_path(h.doc_id) == "forms/shareable/expense.txt"
     assert store.doc_path("nope") is None
+
+
+def test_categories_lists_indexed_categories(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+    assert store.categories() == ["forms", "policy"]
