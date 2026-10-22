@@ -77,6 +77,15 @@ def understand(history: list[Turn], message: str, llm=chat, categories: list[str
         return fallback
 
 
+def _dedupe(hits):
+    """Overlapping chunks repeat text; drop a hit whose text sits inside a better-ranked one."""
+    kept = []
+    for h in hits:
+        if not any(k.doc_id == h.doc_id and h.text in k.text for k in kept):
+            kept.append(h)
+    return kept
+
+
 def _context(hits) -> str:
     return "\n\n".join(f"[แก้ไขล่าสุด {h.mtime}]\n{h.text}" for h in hits)
 
@@ -101,7 +110,7 @@ def answer(history: list[Turn], message: str, store, llm=chat) -> Reply:
     if intent.category:  # the model may pick the wrong category, so also search everything
         seen = {(h.doc_id, h.text) for h in found}
         found += [h for h in store.query(intent.question, TOP_K) if (h.doc_id, h.text) not in seen]
-    hits = sorted((h for h in found if h.distance <= MAX_DISTANCE), key=lambda h: h.distance)[:TOP_K]
+    hits = _dedupe(sorted((h for h in found if h.distance <= MAX_DISTANCE), key=lambda h: h.distance))[:TOP_K]
     if not hits:
         return Reply(NOT_FOUND)
     sources = sorted({h.rel_path for h in hits})

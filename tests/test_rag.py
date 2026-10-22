@@ -167,3 +167,18 @@ def test_wrong_category_does_not_hide_better_hits():
     answer([], "q", store, llm=llm)
     prompt = llm.calls[-1][0][-1]["content"]
     assert "STRONGTEXT" in prompt and prompt.index("STRONGTEXT") < prompt.index("WEAKTEXT")
+
+
+def test_duplicate_contained_chunks_are_dropped_from_prompt():
+    big = hit("a", text="AAAA BBBB CCCC DDDD", distance=0.2)
+    inside = hit("a", text="BBBB CCCC", distance=0.3)
+    llm = FakeLLM([THAI_OK])
+    answer([], "q", FakeStore([big, inside]), llm=llm)
+    prompt = llm.calls[-1][0][-1]["content"]
+    assert prompt.count("BBBB CCCC") == 1
+
+
+def test_top_k_is_four():
+    import config
+
+    assert config.TOP_K == 4
