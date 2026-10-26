@@ -63,7 +63,7 @@ class Store:
             for meta, chunks in items if chunks
         ]
         shared = [m for m, _, _ in embedded if m.downloadable]
-        name_docs = [f"{Path(m.rel_path).stem}\n{m.summary}".strip() for m in shared]
+        name_docs = [f"{Path(m.rel_path).stem}\n{m.summary}".strip() for m in shared]  # not the folder: files of one topic share it, which blurs them together
         name_vecs = self._embed(name_docs) if shared else []
         col, names = self._col, self._names
         drop = (set(self.signatures()) - keep) | {m.doc_id for m, _, _ in embedded}
@@ -74,7 +74,7 @@ class Store:
             names.add(
                 ids=[m.doc_id for m in shared], embeddings=name_vecs,
                 documents=name_docs,
-                metadatas=[{"rel_path": m.rel_path} for m in shared],
+                metadatas=[{"rel_path": m.rel_path, "category": m.category} for m in shared],
             )
         for meta, chunks, vectors in embedded:
             col.add(
@@ -100,12 +100,13 @@ class Store:
             for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0])
         ]
 
-    def find_files(self, question: str, k: int) -> list[NameHit]:
-        """Downloadable files whose name is closest to the question, best first."""
-        n = self._names.count()
+    def find_files(self, question: str, k: int, category: str | None = None) -> list[NameHit]:
+        """Downloadable files whose name and summary are closest to the question, best first; optionally only one topic folder."""
+        where = {"category": category} if category else None
+        n = len(self._names.get(where=where)["ids"])
         if n == 0:
             return []
-        res = self._names.query(query_embeddings=self._embed([question]), n_results=min(k, n))
+        res = self._names.query(query_embeddings=self._embed([question]), n_results=min(k, n), where=where)
         return [NameHit(i, m["rel_path"], d) for i, m, d in zip(res["ids"][0], res["metadatas"][0], res["distances"][0])]
 
     def categories(self) -> list[str]:

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from config import CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, NAME_MAX, THAI_MIN_RATIO, TOP_K
+from config import CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, NAME_MAX, NAME_TIE, THAI_MIN_RATIO, TOP_K
 
 NOT_FOUND = f"ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร กรุณาติดต่อ {HR_CONTACT}"
 CANNOT_SEND = "ขออภัย ไม่สามารถส่งไฟล์นี้ให้ได้ค่ะ"
@@ -14,7 +14,7 @@ HISTORY_TURNS = 6
 ALL_K = 20
 # the small model misses obvious file requests, so a request verb plus a document word counts as one regardless
 ASKS = re.compile(r"ขอ(?!ทราบ)|ส่ง|โหลด|send|download", re.I)
-FILES = re.compile(r"ไฟล์|เอกสาร|แบบฟอร์ม|ฟอร์ม|ใบเสร็จ|ใบสำคัญ|file|form|receipt|document", re.I)
+FILES = re.compile(r"ไฟล์|เอกสาร|แบบฟอร์ม|ฟอร์ม|ใบเสร็จ|ใบสำคัญ|ประกาศ|ระเบียบ|นโยบาย|สัญญา|file|form|receipt|document", re.I)
 
 SYSTEM = """You are an office assistant chatbot. Answer the user's question using ONLY the text inside <context>.
 Rules:
@@ -31,7 +31,7 @@ UNDERSTAND = """Given the chat history and the latest user message, reply with J
  "wants_file": <true if the user asks to be given/sent a document or form file, or asks whether such a file exists or what files are available; false if they only ask for information>,
  "wants_all": <true if the user wants to see every matching file or a list of what exists, or asks for more files than already given; false if one file is enough>,
  "category": <one of CATEGORIES that best fits the question, or null>}
-wants_file is true for: "ขอไฟล์ใบลา", "ขอแบบฟอร์มเบิกเงิน", "ขอใบเสร็จ", "มีไฟล์ใบเสร็จไหม", "มีเอกสารอะไรให้โหลดบ้าง", "ส่งสัญญาให้หน่อย", "thesis publication ไม่มีไฟล์หรอ", "มีมากกว่านี้ไม่ใช่หรอ" after files were given. wants_all is true for: "ใบเสร็จมีอะไรบ้าง ขอไฟล์ด้วย", "มีเอกสารอะไรให้โหลดบ้าง", "ขอทุกไฟล์", "มีมากกว่านี้ไหม". It is false for: "ขอใบเสร็จค่าตีพิมพ์". wants_file is false for: "ลาพักร้อนได้กี่วัน", "ค่าเดินทางเบิกได้เท่าไหร่"."""
+wants_file is true for: "ขอไฟล์ใบลา", "ขอแบบฟอร์มเบิกเงิน", "ขอใบเสร็จ", "มีไฟล์ใบเสร็จไหม", "มีเอกสารอะไรให้โหลดบ้าง", "ส่งสัญญาให้หน่อย", "thesis publication ไม่มีไฟล์หรอ", "มีมากกว่านี้ไม่ใช่หรอ" after files were given. wants_all is true for: "ใบเสร็จมีอะไรบ้าง ขอไฟล์ด้วย", "มีเอกสารอะไรให้โหลดบ้าง", "ขอทุกไฟล์", "มีมากกว่านี้ไหม", "ขอเอกสารใบเสร็จด้วย" (a kind of document, not one specific item). It is false for: "ขอใบเสร็จค่าตีพิมพ์". wants_file is false for: "ลาพักร้อนได้กี่วัน", "ค่าเดินทางเบิกได้เท่าไหร่"."""
 
 
 @dataclass
@@ -125,7 +125,12 @@ def answer(history: list[Turn], message: str, store, llm=chat) -> Reply:
         return Reply("")
     intent = understand(history, message, llm, store.categories())
     if intent.wants_file:  # a file request needs no generated text: the attached file is the answer
-        named = [n for n in store.find_files(intent.question, ALL_K if intent.wants_all else 1) if n.distance <= NAME_MAX]
+        named = []
+        if intent.category:  # the topic folder the model picked is only a hint: fall back to every folder
+            named = [n for n in store.find_files(intent.question, ALL_K, intent.category) if n.distance <= NAME_MAX]
+        named = named or [n for n in store.find_files(intent.question, ALL_K) if n.distance <= NAME_MAX]
+        if not intent.wants_all:
+            named = [n for n in named if n.distance - named[0].distance <= NAME_TIE]
         if named:
             return Reply(FILE_READY, [n.doc_id for n in named], [n.rel_path for n in named])
     found = store.query(intent.question, TOP_K, intent.category)

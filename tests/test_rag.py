@@ -21,10 +21,10 @@ class FakeStore:
         self.queries.append((question, category))
         return self.by_category.get(category, self.hits)
 
-    def find_files(self, question, k):  # a hit's distance stands in for its file-name distance
+    def find_files(self, question, k, category=None):  # a hit's distance stands in for its file-name distance
         seen, out = set(), []
         for h in sorted(self.hits, key=lambda h: h.distance):
-            if h.downloadable and h.doc_id not in seen:
+            if h.downloadable and h.doc_id not in seen and category in (None, h.category):
                 seen.add(h.doc_id)
                 out.append(NameHit(h.doc_id, h.rel_path, h.distance))
         return out[:k]
@@ -94,11 +94,20 @@ def test_info_question_gives_no_file_even_if_downloadable():
     assert r.file_doc_ids == []
 
 
-def test_several_close_downloadable_docs_send_only_the_best_file_name_match():
-    hits = [hit("b", downloadable=True, distance=0.22), hit("a", downloadable=True, distance=0.20)]
+def test_only_the_clearly_best_file_is_sent_but_equal_matches_all_are():
     llm = FakeLLM([], intent={"question": "q", "wants_file": True, "category": None})
-    r = answer([], "ขอแบบฟอร์ม", FakeStore(hits), llm=llm)
-    assert r.file_doc_ids == ["a"]
+    clear = [hit("a", downloadable=True, distance=0.20), hit("b", downloadable=True, distance=0.30)]
+    assert answer([], "ขอแบบฟอร์ม", FakeStore(clear), llm=llm).file_doc_ids == ["a"]
+    tied = [hit("a", downloadable=True, distance=0.20), hit("b", downloadable=True, distance=0.21), hit("c", downloadable=True, distance=0.35)]
+    assert answer([], "ขอใบเสร็จ", FakeStore(tied), llm=llm).file_doc_ids == ["a", "b"]
+
+
+def test_file_request_prefers_the_picked_topic_folder_but_falls_back():
+    hits = [hit("a", downloadable=True, distance=0.20), hit("b", downloadable=True, distance=0.30)]
+    hits[1].category = "forms"
+    llm = lambda cat: FakeLLM([], intent={"question": "q", "wants_file": True, "category": cat})
+    assert answer([], "ขอไฟล์", FakeStore(hits), llm=llm("forms")).file_doc_ids == ["b"]
+    assert answer([], "ขอไฟล์", FakeStore(hits), llm=llm("general")).file_doc_ids == ["a"]  # nothing there: search everywhere
 
 
 def test_request_verb_plus_document_word_is_a_file_request_even_if_model_says_no():

@@ -147,3 +147,10 @@ def test_failed_summary_does_not_stop_indexing(tmp_path):
     def boom(text):
         raise RuntimeError("api down")
     assert build_index(content, store, summarize=boom)["indexed"] == 2
+
+
+def test_find_files_can_be_limited_to_a_topic_folder(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+    assert [h.rel_path for h in store.find_files("expense", 5, "forms")] == ["forms/shareable/expense.txt"]
+    assert store.find_files("expense", 5, "policy") == []
