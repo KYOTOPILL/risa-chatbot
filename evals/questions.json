@@ -1,12 +1,178 @@
 [
-  {"q": "ลาพักร้อนได้กี่วันต่อปี", "must_include": ["10"]},
-  {"q": "How many days of annual leave do I get per year?", "must_include": ["10"]},
-  {"q": "แล้วถ้าลาเกินกี่วันต้องมีใบรับรองแพทย์", "history": [{"role": "user", "content": "ลาป่วยได้กี่วันต่อปี"}, {"role": "assistant", "content": "ลาป่วยได้ไม่เกิน 30 วันต่อปี"}], "must_include": ["3"]},
-  {"q": "โครงการ Alpha คืบหน้าเท่าไหร่แล้ว", "must_include": ["60", "2026-10-01"]},
-  {"q": "ค่าเดินทางต่อวันเท่าไหร่", "must_include": ["700"], "must_not_include": ["500 บาท"]},
-  {"q": "ขอแบบฟอร์มเบิกค่าใช้จ่ายหน่อย", "expect_file": true},
-  {"q": "ขอไฟล์นโยบายการลาหน่อย", "expect_file": false, "must_include": ["ไม่สามารถส่งไฟล์"]},
-  {"q": "บริษัทมีสวัสดิการประกันสุขภาพไหม", "expect_not_found": true},
-  {"q": "ผู้ขายรายใหม่ของบริษัทชื่ออะไร", "must_include": ["Acme"]},
-  {"q": "ต้องส่งแบบฟอร์มเบิกค่าใช้จ่ายภายในกี่วัน", "must_include": ["7"], "expect_file": false}
+ {
+  "q": "ขอใบเสร็จค่าครองชีพ",
+  "expect_files": [
+   "Living"
+  ]
+ },
+ {
+  "q": "ขอใบเสร็จค่าตีพิมพ์ผลงานวิจัย",
+  "expect_files": [
+   "Thesis Publication"
+  ]
+ },
+ {
+  "q": "ขอใบเสร็จค่าเดินทางมา มช",
+  "expect_files": [
+   "Travel Allowance to CMU"
+  ]
+ },
+ {
+  "q": "ขอใบเสร็จค่าตั๋วเดินทางกลับบ้าน",
+  "expect_files": [
+   "Hometown"
+  ]
+ },
+ {
+  "q": "ขอใบเสร็จค่าหนังสือ",
+  "expect_files": [
+   "Book and Stationery"
+  ]
+ },
+ {
+  "q": "ขอใบเสร็จค่าตั้งถิ่นฐาน",
+  "expect_files": [
+   "Settlement"
+  ]
+ },
+ {
+  "q": "ขอประกาศรับสมัครทุน",
+  "expect_files": [
+   "Academic Year 2024"
+  ]
+ },
+ {
+  "q": "ขอเอกสารทุน CMU Presidential",
+  "expect_files": [
+   "Academic Year 2024"
+  ]
+ },
+ {
+  "q": "ขอดูเอหสารทุนหน่อย",
+  "expect_files": [
+   "Academic Year 2024"
+  ]
+ },
+ {
+  "q": "ขอใบเสร็จทั้งหมด",
+  "expect_files": [
+   "Living",
+   "Book and Stationery",
+   "Settlement",
+   "Travel Allowance to CMU",
+   "Hometown",
+   "Thesis Publication"
+  ]
+ },
+ {
+  "q": "แล้วขอเอกสารใบเสร็จรับเงินด้วย",
+  "expect_files": [
+   "Living",
+   "Book and Stationery",
+   "Settlement",
+   "Travel Allowance to CMU",
+   "Hometown",
+   "Thesis Publication"
+  ]
+ },
+ {
+  "q": "มีเอกสารอะไรให้ดาวน์โหลดบ้าง",
+  "expect_files": [],
+  "must_include": [
+   "CMU Presidential Scholarship"
+  ]
+ },
+ {
+  "q": "ขอดูเอกสารทั้งหมด",
+  "expect_files": [],
+  "must_include": [
+   "CMU Presidential Scholarship"
+  ]
+ },
+ {
+  "q": "ขอไฟล์ใบลา",
+  "expect_files": []
+ },
+ {
+  "q": "ขอสัญญาจ้างพนักงาน",
+  "expect_files": []
+ },
+ {
+  "q": "ทุนนี้ได้ค่าครองชีพเดือนละเท่าไหร่",
+  "expect_files": [],
+  "must_include": [
+   "12,000"
+  ]
+ },
+ {
+  "q": "ค่าเดินทางไปมหาวิทยาลัยเบิกได้เท่าไหร่",
+  "expect_files": [],
+  "must_include": [
+   "15,000"
+  ]
+ },
+ {
+  "q": "คุณสมบัติผู้สมัครมีอะไรบ้าง",
+  "expect_files": [],
+  "must_include": [
+   "3.50"
+  ]
+ },
+ {
+  "q": "ประกาศนี้เปิดรับสมัครกี่ทุน",
+  "expect_files": [],
+  "must_include": [
+   "200"
+  ]
+ },
+ {
+  "q": "ผู้สมัครต้องมีคะแนน IELTS เท่าไหร่",
+  "expect_files": [],
+  "must_include": [
+   "6.0"
+  ]
+ },
+ {
+  "q": "วิธีทำต้มยำกุ้ง",
+  "expect_files": [],
+  "expect_not_found": true
+ },
+ {
+  "q": "ลาพักร้อนได้กี่วันต่อปี",
+  "expect_files": [],
+  "expect_not_found": true
+ },
+ {
+  "q": "แล้วค่าตีพิมพ์ล่ะ",
+  "history": [
+   {
+    "role": "user",
+    "content": "ขอใบเสร็จค่าครองชีพ"
+   },
+   {
+    "role": "assistant",
+    "content": "นี่คือไฟล์ที่เกี่ยวข้องค่ะ"
+   }
+  ],
+  "expect_files": [
+   "Thesis Publication"
+  ]
+ },
+ {
+  "q": "แล้วต้องมี IELTS เท่าไหร่",
+  "history": [
+   {
+    "role": "user",
+    "content": "คุณสมบัติผู้สมัครมีอะไรบ้าง"
+   },
+   {
+    "role": "assistant",
+    "content": "ต้องมี GPA ไม่ต่ำกว่า 3.50 และมีผลสอบภาษาอังกฤษ"
+   }
+  ],
+  "must_include": [
+   "6.0"
+  ],
+  "expect_files": []
+ }
 ]

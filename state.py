@@ -7,6 +7,11 @@ from store import Store
 lock = threading.Lock()
 
 
+# normalized question -> Reply, only for questions with no history; cleared on every reindex
+cache: dict = {}
+CACHE_MAX = 500
+
+
 @lru_cache
 def get_store() -> Store:
     return Store()

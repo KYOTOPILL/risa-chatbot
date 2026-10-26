@@ -36,8 +36,37 @@ h1 { text-wrap: balance; }
 .msg.user { align-self: flex-end; background: var(--user); color: var(--user-ink); border-bottom-right-radius: 6px; }
 .msg.bot { align-self: flex-start; background: var(--bot); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
 .msg.err { color: var(--err); }
-.file { display: block; margin-top: 8px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
-.file:hover { filter: brightness(1.2); }
+.ftype { display: inline-block; margin-left: 8px; vertical-align: -.35em; line-height: 0; }
+.ftype svg { height: 1.5em; width: auto; }
+
+.row { display: flex; gap: 10px; align-items: flex-start; max-width: 92%; }
+.row.user { align-self: flex-end; flex-direction: column; align-items: flex-end; }
+.row.bot { align-self: flex-start; }
+.row .msg { max-width: none; min-width: 0; }
+.avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; font-weight: 800; font-size: .72rem; letter-spacing: .02em; }
+.stack { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.row.user .stack { align-items: flex-end; }
+.time { margin-top: 3px; font-size: .75rem; color: var(--muted); opacity: 0; transition: opacity .15s; }
+.row:hover .time { opacity: 1; }
+@media (hover: none) { .time { opacity: .7; } }
+
+.cards { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; white-space: normal; }
+.fcard { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--bg); color: var(--text); text-decoration: none; transition: border-color .15s, translate .15s; }
+.fcard:hover { border-color: var(--accent); translate: 0 -1px; }
+.fcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fcard .ftype { margin: 0; flex: none; }
+.fcard .ftype svg { height: 38px; }
+.fbody { flex: 1; min-width: 0; }
+.fname { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fsum { margin-top: 2px; font-size: .85rem; color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fmeta { margin-top: 2px; font-size: .75rem; color: var(--muted); }
+.fdl { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.fcard:hover .fdl { background: var(--accent); color: var(--accent-ink); }
+
+.waiting { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); }
+.waiting .typing { padding: 0; }
 
 .typing { display: inline-flex; gap: 5px; padding: 4px 0; }
 .typing i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite ease-in-out; }
@@ -65,7 +94,7 @@ button:active:not(:disabled), .chip:active { transform: scale(.97); }
 .link, .del, .crumb { position: relative; }
 .link::after, .del::after, .crumb::after { content: ""; position: absolute; inset: -8px -6px; }
 
-@supports (corner-shape: squircle) { .msg, .card, dialog, .primary, .composer textarea, #send { corner-shape: squircle; } }
+@supports (corner-shape: squircle) { .msg, .fcard, .card, dialog, .primary, .composer textarea, #send { corner-shape: squircle; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after { transition: none !important; }

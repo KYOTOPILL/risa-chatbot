@@ -120,6 +120,43 @@ def test_reindex_adds_and_removes_files_from_search(env):
     assert store.query("annual leave", k=1) == []
 
 
+def test_reindex_clears_answer_cache(env):
+    _, _, c = env
+    state.cache["ลากี่วัน"] = object()
+    c.post("/api/admin/reindex")
+    assert state.cache == {}
+
+
+def test_file_list_includes_the_thai_summary_of_every_file(env):
+    from ingest import build_index
+    content, store, c = env
+    up(c, "form.txt", b"annual leave form " * 10, category="forms", downloadable=True)
+    up(c, "policy.txt", b"annual leave ten days " * 10)
+    build_index(content, store, summarize=lambda text: "แบบฟอร์มลา")
+    rows = {r["path"].split("/")[-1]: r for r in c.get("/api/admin/files").json()}
+    assert rows["form.txt"]["summary"] == rows["policy.txt"]["summary"] == "แบบฟอร์มลา"  # every file has one, downloadable or not
+
+
+def test_summary_still_listed_after_downloadable_is_switched_off(env):
+    from ingest import build_index
+    content, store, c = env
+    up(c, "form.txt", b"annual leave form " * 10, category="forms", downloadable=True)
+    build_index(content, store, summarize=lambda text: "แบบฟอร์มลา")
+    path = c.get("/api/admin/files").json()[0]["path"]
+    c.post("/api/admin/move", json={"path": path, "downloadable": False})
+    build_index(content, store, summarize=lambda text: "ไม่ควรเรียก")
+    row = c.get("/api/admin/files").json()[0]
+    assert row["downloadable"] is False and row["summary"] == "แบบฟอร์มลา"
+
+
+def test_file_that_was_never_downloadable_still_gets_a_description(env):
+    from ingest import build_index
+    content, store, c = env
+    up(c, "internal.txt", b"internal policy text " * 10)
+    build_index(content, store, summarize=lambda text: "นโยบายภายใน")
+    assert c.get("/api/admin/files").json()[0]["summary"] == "นโยบายภายใน"
+
+
 def test_admin_page_served(env):
     _, _, c = env
     r = c.get("/admin")

@@ -129,16 +129,16 @@ def test_reindex_only_embeds_changed_files_and_drops_deleted(tmp_path):
     assert counting.find_files("expense", 5) == [] and counting.doc_path(next(iter(counting.signatures()))) == "policy/leave.txt"
 
 
-def test_summary_is_made_only_for_new_downloadable_files_and_used_for_name_search(tmp_path):
+def test_summary_is_made_once_per_new_file_and_used_for_name_search(tmp_path):
     content, store = make(tmp_path)
     seen = []
     def fake_summary(text):
         seen.append(text)
         return "ใบเบิกค่าใช้จ่าย"
     build_index(content, store, summarize=fake_summary)
-    assert seen == ["expense claim form for receipts"]  # leave.txt is not downloadable
+    assert len(seen) == 2  # every file, so a file switched off keeps its description
     build_index(content, store, summarize=fake_summary)
-    assert len(seen) == 1  # unchanged file is not summarized again
+    assert len(seen) == 2  # unchanged files are not summarized again
     assert "ใบเบิกค่าใช้จ่าย" in store._names.get()["documents"][0]
 
 
@@ -154,3 +154,47 @@ def test_find_files_can_be_limited_to_a_topic_folder(tmp_path):
     build_index(content, store)
     assert [h.rel_path for h in store.find_files("expense", 5, "forms")] == ["forms/shareable/expense.txt"]
     assert store.find_files("expense", 5, "policy") == []
+
+
+def test_topics_counts_downloadable_files_per_folder(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+    assert store.topics() == {"forms": 1}
+
+
+def test_summaries_drop_the_inline_keyword_list(tmp_path):
+    content = tmp_path / "content"
+    (content / "forms" / "shareable").mkdir(parents=True)
+    (content / "forms" / "shareable" / "a.txt").write_text("annual leave form " * 10)
+    store = Store(tmp_path / "index", embed_fn=fake_embed)
+    build_index(content, store, summarize=lambda text: "แบบฟอร์มลา คำค้น: ลา, ใบลา")
+    assert list(store.summaries().values()) == ["แบบฟอร์มลา"]
+
+
+def test_summaries_returns_only_requested_downloadable_files(tmp_path):
+    content = tmp_path / "content"
+    (content / "forms" / "shareable").mkdir(parents=True)
+    (content / "forms" / "shareable" / "a.txt").write_text("annual leave form " * 10)
+    store = Store(tmp_path / "index", embed_fn=fake_embed)
+    build_index(content, store, summarize=lambda text: "แบบฟอร์มลา\n\nคำค้น: ลา, ใบลา")
+    everything = store.summaries()
+    (doc_id, summary), = everything.items()
+    assert summary == "แบบฟอร์มลา" and store.summaries([doc_id]) == everything
+    assert store.summaries([]) == {} and store.summaries(["nope"]) == {}
+
+
+def test_summary_survives_moving_a_file_in_and_out_of_shareable(tmp_path):
+    content = tmp_path / "content"
+    (content / "forms" / "shareable").mkdir(parents=True)
+    f = content / "forms" / "shareable" / "a.txt"
+    f.write_text("annual leave form " * 10)
+    store = Store(tmp_path / "index", embed_fn=fake_embed)
+    calls = []
+    summarize = lambda text: calls.append(1) or "แบบฟอร์มลา"
+    build_index(content, store, summarize)
+    f.rename(content / "forms" / "a.txt")  # downloadable off: new path, same content
+    build_index(content, store, summarize)
+    (content / "forms" / "a.txt").rename(f)  # and on again
+    build_index(content, store, summarize)
+    assert len(calls) == 1 and list(store.summaries().values()) == ["แบบฟอร์มลา"]
+    assert store.cached_summary("nope") == ""

@@ -14,6 +14,7 @@ import state
 from config import CONTENT_DIR, ROOT, SUPPORTED_EXTS
 from docmeta import SHAREABLE, doc_meta
 from ingest import build_index, summarize
+from store import display_summary
 
 MAX_BYTES = 25 * 1024 * 1024
 ADMIN_USER = "admin"
@@ -80,12 +81,14 @@ def page():
 @router.get("/api/admin/files")
 def list_files():
     rows = []
+    store = state.get_store()
+    summaries = store.summaries()
     for p in sorted(CONTENT_DIR.rglob("*")):
         if not p.is_file() or p.name.startswith("."):
             continue
         m = doc_meta(p, CONTENT_DIR)
         rows.append({"path": m.rel_path, "category": m.category, "downloadable": m.downloadable,
-                     "size": p.stat().st_size, "mtime": m.mtime, "supported": p.suffix.lower() in SUPPORTED_EXTS})
+                     "size": p.stat().st_size, "mtime": m.mtime, "summary": summaries.get(m.doc_id) or display_summary(store.cached_summary(m.sig)), "supported": p.suffix.lower() in SUPPORTED_EXTS})
     return rows
 
 
@@ -187,7 +190,10 @@ def move(body: MoveIn):
 @router.post("/api/admin/reindex")
 def reindex():
     with state.lock:  # chat waits while the index is rebuilt
-        return build_index(CONTENT_DIR, state.get_store(), summarize)
+        try:
+            return build_index(CONTENT_DIR, state.get_store(), summarize)
+        finally:
+            state.cache.clear()
 
 
 def _folder(name: str) -> Path:

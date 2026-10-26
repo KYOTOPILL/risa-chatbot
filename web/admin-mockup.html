@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RiSA Admin Mockup</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+<div class="adm">
+  <header class="top">
+    <div class="brand"><span class="mark">RiSA</span><span class="sub">จัดการเอกสาร · mockup</span></div>
+    <a class="ghost" href="/mockup">ไปหน้าแชท (mockup)</a>
+  </header>
+
+  <section class="card drive">
+    <div class="between">
+      <nav id="crumbs" class="crumbs" aria-label="โฟลเดอร์"></nav>
+      <div class="tools">
+        <button class="ghost" id="newdir" type="button">โฟลเดอร์ใหม่</button>
+        <button class="primary" id="pick" type="button">อัปโหลดไฟล์</button>
+      </div>
+    </div>
+
+    <div id="index" class="index"></div>
+
+    <div id="bulk" class="bulk" inert>
+      <div class="bulkin">
+        <span id="count" class="count"></span>
+        <button class="ghost" id="mvsel" type="button">ย้ายไป…</button>
+        <button class="ghost danger" id="delsel" type="button">ลบ</button>
+        <button class="ghost" id="clear" type="button">ยกเลิกการเลือก</button>
+      </div>
+    </div>
+
+    <div id="list" class="flist" role="table"></div>
+    <p class="muted">หน้านี้เป็นตัวอย่าง ข้อมูลจำลอง ไม่แตะไฟล์จริง</p>
+  </section>
+</div>
+<div id="toast" class="toast hidden" role="status"><span id="tmsg"></span><button id="undo" class="link" type="button">เลิกทำ</button></div>
+<script src="/static/icons.js"></script>
+<script src="/static/admin-mockup.js"></script>
+</body>
+</html>

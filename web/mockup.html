@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RiSA Mockup</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="mark">RiSA</span><span class="sub">ผู้ช่วยสำนักงาน · mockup</span></div>
+    <button id="new" class="ghost" type="button">เริ่มแชทใหม่</button>
+  </header>
+  <main id="log" class="log"></main>
+  <form class="composer" onsubmit="return false">
+    <textarea rows="1" placeholder="พิมพ์คำถามของคุณ" aria-label="พิมพ์คำถามของคุณ"></textarea>
+    <button type="submit" aria-label="ส่ง"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.4 20.4 21 12 3.4 3.6l-.1 6.5L15 12 3.3 13.9z" fill="currentColor"/></svg></button>
+  </form>
+  <p class="hint">หน้านี้เป็นตัวอย่างเท่านั้น ไม่เรียก API</p>
+</div>
+<script src="/static/icons.js"></script>
+<script src="/static/mockup.js"></script>
+</body>
+</html>

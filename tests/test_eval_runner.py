@@ -1,5 +1,5 @@
 from config import HR_CONTACT
-from evals.run_eval import run
+from evals.run_eval import check, run
 from rag import Reply
 
 THAI = "ลาพักร้อน 10 วัน"
@@ -37,3 +37,12 @@ def test_expect_not_found():
 
 def test_english_answer_fails():
     assert not one({"q": "x"}, fake("Ten days of leave.")).passed
+
+
+def test_expect_files_matches_names_exactly():
+    reply = Reply(THAI, ["a", "b"])
+    case = {"q": "x", "expect_files": ["alpha", "beta"]}
+    assert not check(case, reply, ["Alpha.pdf"]) == []
+    assert check(case, reply, ["Alpha.pdf", "beta.pdf"]) == []
+    assert check(case, reply, ["Alpha.pdf", "beta.pdf", "gamma.pdf"]) == ["unexpected file 'gamma.pdf'"]
+    assert check({"q": "x", "expect_files": []}, Reply(THAI), []) == []

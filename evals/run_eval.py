@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import HR_CONTACT
+import rag
 from rag import Reply, Turn, answer, is_mostly_thai
 
 
@@ -15,12 +16,21 @@ class Result:
     reasons: list[str] = field(default_factory=list)
 
 
-def check(case: dict, reply: Reply) -> list[str]:
+def check(case: dict, reply: Reply, names: list[str] = ()) -> list[str]:
     bad = []
     if not is_mostly_thai(reply.text):
         bad.append("answer is not Thai")
     bad += [f"missing {s!r}" for s in case.get("must_include", []) if s not in reply.text]
     bad += [f"unexpected {s!r}" for s in case.get("must_not_include", []) if s in reply.text]
+    if "expect_files" in case:  # each expected name fragment matches one sent file, and nothing else is sent
+        left = list(names)
+        for frag in case["expect_files"]:
+            hit = next((n for n in left if frag.lower() in n.lower()), None)
+            if hit is None:
+                bad.append(f"missing file {frag!r}")
+            else:
+                left.remove(hit)
+        bad += [f"unexpected file {n!r}" for n in left]
     if "expect_file" in case and case["expect_file"] != bool(reply.file_doc_ids):
         bad.append(f"expect_file={case['expect_file']} got {reply.file_doc_ids}")
     if "expect_not_found" in case and case["expect_not_found"] != (HR_CONTACT in reply.text):
@@ -28,11 +38,12 @@ def check(case: dict, reply: Reply) -> list[str]:
     return bad
 
 
-def run(cases: list[dict], answer_fn) -> list[Result]:
+def run(cases: list[dict], answer_fn, file_names=lambda ids: ids) -> list[Result]:
     results = []
     for case in cases:
         history = [Turn(**t) for t in case.get("history", [])]
-        bad = check(case, answer_fn(history, case["q"]))
+        reply = answer_fn(history, case["q"])
+        bad = check(case, reply, file_names(reply.file_doc_ids))
         results.append(Result(case["q"], not bad, bad))
     return results
 
@@ -42,8 +53,10 @@ if __name__ == "__main__":
 
     store = Store()
     cases = json.loads((Path(__file__).parent / "questions.json").read_text(encoding="utf-8"))
-    results = run(cases, lambda history, q: answer(history, q, store))
+    names = lambda ids: [Path(store.doc_path(i)).name for i in ids]
+    results = run(cases, lambda history, q: answer(history, q, store), names)
     for r in results:
         print("PASS" if r.passed else "FAIL", r.q, *r.reasons, sep="  ")
     print(f"{sum(r.passed for r in results)}/{len(results)} passed")
+    print("tokens:", rag.usage)
     sys.exit(0 if all(r.passed for r in results) else 1)

@@ -50,15 +50,27 @@ app.include_router(admin.router)
 @app.post("/api/chat")
 def chat(body: ChatIn):
     history = [rag.Turn(t.role, t.content) for t in body.history]
+    key = " ".join(body.message.split()).casefold() if not history else None
     try:
-        with state.lock:
-            reply = rag.answer(history, body.message, state.get_store())
+        reply = state.cache.get(key)
+        if reply is None:
+            with state.lock:
+                reply = rag.answer(history, body.message, state.get_store())
+            if key and len(state.cache) < state.CACHE_MAX:  # full: stop adding, a reindex clears it
+                state.cache[key] = reply
     except Exception:
         log.exception("answer failed")
         return JSONResponse({"text": ERROR_TEXT, "files": []}, status_code=503)
     log.info("q=%r sources=%s", body.message, reply.sources)
     store = state.get_store()
-    files = [{"id": i, "name": Path(store.doc_path(i)).name} for i in reply.file_doc_ids if store.doc_path(i)]
+    summaries = store.summaries(reply.file_doc_ids)
+    files = []
+    for i in reply.file_doc_ids:
+        rel = store.doc_path(i)
+        if rel:
+            path = CONTENT_DIR / rel
+            files.append({"id": i, "name": Path(rel).name, "summary": summaries.get(i, ""),
+                          "size": path.stat().st_size if path.is_file() else None})
     return {"text": reply.text, "files": files}
 
 
@@ -73,6 +85,16 @@ def download(doc_id: str):
 @app.get("/")
 def index():
     return FileResponse(WEB / "index.html")
+
+
+@app.get("/mockup")
+def mockup():  # static design preview: fake chat, no model calls
+    return FileResponse(WEB / "mockup.html")
+
+
+@app.get("/admin-mockup")
+def admin_mockup():  # static design preview: fake files, touches nothing
+    return FileResponse(WEB / "admin-mockup.html")
 
 
 app.mount("/static", RevalidatingStatic(directory=WEB), name="static")

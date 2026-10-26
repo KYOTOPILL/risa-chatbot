@@ -1,3 +1,5 @@
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,12 +33,38 @@ class NameHit:
     doc_id: str
     rel_path: str
     distance: float
+    category: str = ""
+    summary: str = ""
+
+
+def display_summary(text: str) -> str:
+    """The Thai sentences of a summary; the keyword list after it is for search, not for display."""
+    return re.split(r"\n\n|คำค้น:", text)[0].strip()
 
 
 class Store:
     def __init__(self, index_dir: Path = INDEX_DIR, embed_fn=embed):
         self._client = chromadb.PersistentClient(path=str(index_dir))
         self._embed = embed_fn
+        self._summary_file = Path(index_dir) / "summaries.json"
+
+    # Summaries are remembered by file signature (size + mtime), not by path: moving or renaming a file, or
+    # switching downloadable off and on, keeps the same content, so it keeps its summary and costs no new API call.
+    def cached_summary(self, sig: str) -> str:
+        try:
+            return json.loads(self._summary_file.read_text(encoding="utf-8")).get(sig, "")
+        except (OSError, ValueError):
+            return ""
+
+    def remember_summary(self, sig: str, summary: str) -> None:
+        try:
+            data = json.loads(self._summary_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[sig] = summary
+        tmp = self._summary_file.with_suffix(".part")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self._summary_file)
 
     @property
     def _col(self):
@@ -107,7 +135,24 @@ class Store:
         if n == 0:
             return []
         res = self._names.query(query_embeddings=self._embed([question]), n_results=min(k, n), where=where)
-        return [NameHit(i, m["rel_path"], d) for i, m, d in zip(res["ids"][0], res["metadatas"][0], res["distances"][0])]
+        return [
+            NameHit(i, m["rel_path"], d, m["category"], doc.partition("\n")[2].strip())  # the document is "name\nsummary"
+            for i, m, d, doc in zip(res["ids"][0], res["metadatas"][0], res["distances"][0], res["documents"][0])
+        ]
+
+    def summaries(self, ids: list[str] | None = None) -> dict[str, str]:
+        """doc_id -> Thai summary of downloadable files (all of them, or only `ids`). First paragraph only: the keyword list after it is for search, not for display."""
+        if ids == []:
+            return {}
+        res = self._names.get(ids=ids)
+        return {i: display_summary(d.partition("\n")[2].strip()) for i, d in zip(res["ids"], res["documents"])}
+
+    def topics(self) -> dict[str, int]:
+        """Topic folder -> number of downloadable files in it."""
+        out: dict[str, int] = {}
+        for m in self._names.get(include=["metadatas"])["metadatas"]:
+            out[m["category"]] = out.get(m["category"], 0) + 1
+        return out
 
     def categories(self) -> list[str]:
         return sorted({m["category"] for m in self._col.get(include=["metadatas"])["metadatas"]})

@@ -19,7 +19,8 @@ def summarize(text: str) -> str:
 
 
 def build_index(content_dir: Path, store: Store, summarize=None) -> dict:
-    """`summarize` (text -> Thai summary) is called only for new or changed downloadable files; None skips it."""
+    """`summarize` (text -> Thai summary) is called once per new or changed file, downloadable or not, so a file keeps
+    its description when it is switched off; None skips it. A file whose summary is missing is indexed again."""
     items, skipped, keep = [], [], set()
     known = store.signatures()
     for path in sorted(p for p in content_dir.rglob("*") if p.is_file()):
@@ -28,7 +29,8 @@ def build_index(content_dir: Path, store: Store, summarize=None) -> dict:
             skipped.append(f"{rel}: unsupported")
             continue
         meta = doc_meta(path, content_dir)
-        if meta.sig and known.get(meta.doc_id) == meta.sig:  # unchanged since last run: skip extract and embed
+        if meta.sig and known.get(meta.doc_id) == meta.sig and (not summarize or store.cached_summary(meta.sig)):
+            # unchanged since last run: skip extract and embed
             keep.add(meta.doc_id)
             continue
         try:
@@ -40,11 +42,15 @@ def build_index(content_dir: Path, store: Store, summarize=None) -> dict:
         if not chunks:
             skipped.append(f"{rel}: no extractable text (scanned?)")
             continue
-        if summarize and meta.downloadable:
-            try:
-                meta = dataclasses.replace(meta, summary=summarize(text))
-            except Exception as e:  # the file is still findable by name
-                log.warning("summary failed for %s: %s", rel, e)
+        if summarize:
+            summary = store.cached_summary(meta.sig)  # same content under a new path: no new API call
+            if not summary:
+                try:
+                    summary = summarize(text)
+                    store.remember_summary(meta.sig, summary)
+                except Exception as e:  # the file is still findable by name
+                    log.warning("summary failed for %s: %s", rel, e)
+            meta = dataclasses.replace(meta, summary=summary)
         items.append((meta, chunks))
     store.update(items, keep)
     for s in skipped:

@@ -12,6 +12,16 @@ class FakeStore:
     def doc_path(self, doc_id):
         return "policy/ใบลา.pdf"
 
+    def summaries(self, ids=None):
+        return {"abc": "แบบฟอร์มใบลา"}
+
+
+@pytest.fixture(autouse=True)
+def clean_cache():
+    state.cache.clear()
+    yield
+    state.cache.clear()
+
 
 @pytest.fixture
 def client():
@@ -27,7 +37,14 @@ def test_chat_returns_text_and_file_ids(client):
     with patch("rag.answer", return_value=rag.Reply("ลาพักร้อน 10 วัน", ["abc"], ["policy/leave.pdf"])):
         r = post(client)
     assert r.status_code == 200
-    assert r.json() == {"text": "ลาพักร้อน 10 วัน", "files": [{"id": "abc", "name": "ใบลา.pdf"}]}
+    assert r.json() == {"text": "ลาพักร้อน 10 วัน", "files": [{"id": "abc", "name": "ใบลา.pdf", "summary": "แบบฟอร์มใบลา", "size": None}]}
+
+
+def test_file_size_comes_from_the_content_folder(client, tmp_path):
+    (tmp_path / "policy").mkdir()
+    (tmp_path / "policy" / "ใบลา.pdf").write_bytes(b"x" * 2048)
+    with patch("rag.answer", return_value=rag.Reply("ตอบ", ["abc"])), patch.object(server, "CONTENT_DIR", tmp_path):
+        assert post(client).json()["files"][0]["size"] == 2048
 
 
 def test_response_never_contains_sources(client):
@@ -81,6 +98,21 @@ def test_index_page_served_in_thai(client):
     assert r.status_code == 200 and "RiSA" in r.text and 'lang="th"' in r.text
 
 
+def test_mockup_page_and_scripts_served_without_model_call(client):
+    with patch("rag.answer") as ans:
+        page = client.get("/mockup")
+        assert page.status_code == 200 and "mockup.js" in page.text and "icons.js" in page.text
+        assert client.get("/static/mockup.js").status_code == 200 and "function fileIcon" in client.get("/static/icons.js").text
+    assert ans.call_count == 0
+    assert "icons.js" in client.get("/").text
+
+
+def test_admin_mockup_served_without_login_or_model_call(client):
+    page = client.get("/admin-mockup")
+    assert page.status_code == 200 and "admin-mockup.js" in page.text
+    assert client.get("/static/admin-mockup.js").status_code == 200
+
+
 def test_concurrent_requests_are_serialised(client):
     import threading
     import time
@@ -100,3 +132,32 @@ def test_concurrent_requests_are_serialised(client):
         [t.start() for t in ts]
         [t.join() for t in ts]
     assert peak == 1
+
+
+def test_repeated_question_without_history_is_answered_from_cache(client):
+    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+        a, b = post(client, "ลากี่วัน"), post(client, "  ลากี่วัน ")
+    assert a.json() == b.json() and ans.call_count == 1
+
+
+def test_question_with_history_is_never_cached(client):
+    hist = [{"role": "user", "content": "ก"}, {"role": "assistant", "content": "ข"}]
+    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+        post(client, "ต่อ", hist), post(client, "ต่อ", hist)
+    assert ans.call_count == 2 and state.cache == {}
+
+
+def test_failed_answer_is_not_cached(client):
+    with patch("rag.answer", side_effect=RuntimeError("boom")):
+        assert post(client).status_code == 503
+    assert state.cache == {}
+
+
+@pytest.mark.parametrize("js, html", [("app.js", "index.html"), ("admin.js", "admin.html")])
+def test_every_element_id_a_script_looks_up_exists_in_its_page(js, html):
+    import re
+    from pathlib import Path
+    web = Path(server.WEB)
+    ids = set(re.findall(r'\$\("([\w-]+)"\)', (web / js).read_text(encoding="utf-8")))
+    page = (web / html).read_text(encoding="utf-8")
+    assert [i for i in ids if f'id="{i}"' not in page] == []  # a missing id throws at load and the page stays blank
