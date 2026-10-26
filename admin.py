@@ -13,7 +13,7 @@ from pydantic import BaseModel
 import state
 from config import CONTENT_DIR, ROOT, SUPPORTED_EXTS
 from docmeta import SHAREABLE, doc_meta
-from ingest import build_index
+from ingest import build_index, summarize
 
 MAX_BYTES = 25 * 1024 * 1024
 ADMIN_USER = "admin"
@@ -187,7 +187,7 @@ def move(body: MoveIn):
 @router.post("/api/admin/reindex")
 def reindex():
     with state.lock:  # chat waits while the index is rebuilt
-        return build_index(CONTENT_DIR, state.get_store())
+        return build_index(CONTENT_DIR, state.get_store(), summarize)
 
 
 def _folder(name: str) -> Path:

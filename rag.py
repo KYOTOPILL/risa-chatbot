@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from config import CHAT_MODEL, FILE_MARGIN, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
+from config import CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, NAME_MAX, THAI_MIN_RATIO, TOP_K
 
 NOT_FOUND = f"ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร กรุณาติดต่อ {HR_CONTACT}"
 CANNOT_SEND = "ขออภัย ไม่สามารถส่งไฟล์นี้ให้ได้ค่ะ"
@@ -124,26 +124,18 @@ def answer(history: list[Turn], message: str, store, llm=chat) -> Reply:
     if not message.strip():
         return Reply("")
     intent = understand(history, message, llm, store.categories())
-    k = ALL_K if intent.wants_all else TOP_K  # a list request needs hits from many different files
-    found = store.query(intent.question, k, intent.category)
+    if intent.wants_file:  # a file request needs no generated text: the attached file is the answer
+        named = [n for n in store.find_files(intent.question, ALL_K if intent.wants_all else 1) if n.distance <= NAME_MAX]
+        if named:
+            return Reply(FILE_READY, [n.doc_id for n in named], [n.rel_path for n in named])
+    found = store.query(intent.question, TOP_K, intent.category)
     if intent.category:  # the model may pick the wrong category, so also search everything
         seen = {(h.doc_id, h.text) for h in found}
-        found += [h for h in store.query(intent.question, k) if (h.doc_id, h.text) not in seen]
-    hits = _dedupe(sorted((h for h in found if h.distance <= MAX_DISTANCE), key=lambda h: h.distance))[:k]
+        found += [h for h in store.query(intent.question, TOP_K) if (h.doc_id, h.text) not in seen]
+    hits = _dedupe(sorted((h for h in found if h.distance <= MAX_DISTANCE), key=lambda h: h.distance))[:TOP_K]
     if not hits:
         return Reply(NOT_FOUND)
-    sources = sorted({h.rel_path for h in hits})
-    files: list[str] = []
-    best = {}
+    text = _generate(intent.question, hits, llm)
     if intent.wants_file:
-        top = min(h.distance for h in hits)
-        for h in hits:  # hits are sorted closest first, so the first downloadable one is the best guess
-            if h.downloadable and h.distance - top <= FILE_MARGIN:
-                best.setdefault(h.doc_id, h)
-                if not intent.wants_all:
-                    break
-    # a file request needs no generated text: the attached file is the answer, and skipping the call is faster and cheaper
-    text = FILE_READY if best else _generate(intent.question, hits, llm)
-    if intent.wants_file and not best:
         text = f"{text}\n\n{CANNOT_SEND}"
-    return Reply(text, list(best), sources)
+    return Reply(text, [], sorted({h.rel_path for h in hits}))

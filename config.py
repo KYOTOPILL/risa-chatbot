@@ -16,10 +16,11 @@ EMBED_MODEL = "bge-m3"
 
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
+SUMMARY_CHARS = 6000  # how much of a file the summary call reads
 TOP_K = 4
 MAX_DISTANCE = 0.6  # cosine distance; tune with evals
 THAI_MIN_RATIO = 0.5  # ponytail: char-ratio heuristic lets a half-Thai reply through; use a language detector if it matters
-FILE_MARGIN = 0.15  # downloadable doc must be this close to the best hit; tune with evals
+NAME_MAX = 0.45  # cosine distance from request to file name; tune with evals
 
 HR_CONTACT = "ฝ่ายทรัพยากรบุคคล (HR) อีเมล hr@example.com"  # placeholder
 SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md"}

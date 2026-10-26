@@ -3,7 +3,7 @@ import json
 import rag
 from config import HR_CONTACT
 from rag import Intent, Turn, answer, is_mostly_thai, understand
-from store import Hit
+from store import Hit, NameHit
 
 THAI_OK = "พนักงานลาพักร้อนได้ 10 วันต่อปี ตามนโยบาย HR"
 
@@ -20,6 +20,14 @@ class FakeStore:
     def query(self, question, k, category=None):
         self.queries.append((question, category))
         return self.by_category.get(category, self.hits)
+
+    def find_files(self, question, k):  # a hit's distance stands in for its file-name distance
+        seen, out = set(), []
+        for h in sorted(self.hits, key=lambda h: h.distance):
+            if h.downloadable and h.doc_id not in seen:
+                seen.add(h.doc_id)
+                out.append(NameHit(h.doc_id, h.rel_path, h.distance))
+        return out[:k]
 
     def categories(self):
         return ["policy", "forms", "general"]
@@ -69,10 +77,10 @@ def test_wants_file_returns_only_downloadable_doc_ids():
     assert r.file_doc_ids == ["b"]
 
 
-def test_file_request_sends_file_even_when_text_has_no_answer():
-    llm = FakeLLM(["NOT_FOUND"], intent={"question": "q", "wants_file": True, "category": None})
+def test_file_request_needs_no_generate_call():
+    llm = FakeLLM([], intent={"question": "q", "wants_file": True, "category": None})
     r = answer([], "มีไฟล์ใบเสร็จไหม", FakeStore([hit(downloadable=True)]), llm=llm)
-    assert r.file_doc_ids == ["d1"] and r.text == rag.FILE_READY
+    assert r.file_doc_ids == ["d1"] and r.text == rag.FILE_READY and len(llm.calls) == 1
 
 
 def test_nondownloadable_file_request_says_cannot_send():
@@ -86,9 +94,9 @@ def test_info_question_gives_no_file_even_if_downloadable():
     assert r.file_doc_ids == []
 
 
-def test_several_close_downloadable_docs_send_closest_without_asking():
+def test_several_close_downloadable_docs_send_only_the_best_file_name_match():
     hits = [hit("b", downloadable=True, distance=0.22), hit("a", downloadable=True, distance=0.20)]
-    llm = FakeLLM(["แนบไฟล์ให้แล้วค่ะ"], intent={"question": "q", "wants_file": True, "category": None})
+    llm = FakeLLM([], intent={"question": "q", "wants_file": True, "category": None})
     r = answer([], "ขอแบบฟอร์ม", FakeStore(hits), llm=llm)
     assert r.file_doc_ids == ["a"]
 
@@ -146,7 +154,7 @@ def test_is_mostly_thai():
 
 
 def test_file_request_for_nondownloadable_ignores_far_downloadable_hit():
-    hits = [hit("a", downloadable=False, distance=0.10), hit("b", downloadable=True, distance=0.50)]
+    hits = [hit("a", downloadable=False, distance=0.10), hit("b", downloadable=True, distance=0.60)]
     llm = FakeLLM([THAI_OK], intent={"question": "q", "wants_file": True, "category": None})
     r = answer([], "ขอไฟล์นโยบายการลา", FakeStore(hits), llm=llm)
     assert r.file_doc_ids == [] and rag.CANNOT_SEND in r.text

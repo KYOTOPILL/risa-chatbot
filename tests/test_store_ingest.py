@@ -101,3 +101,49 @@ def test_failed_reingest_keeps_old_index(tmp_path):
     except RuntimeError:
         pass
     assert store.query("annual leave", k=1)
+
+
+def test_find_files_matches_file_name_and_only_downloadable(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+    hits = store.find_files("expense", 5)
+    assert [h.rel_path for h in hits] == ["forms/shareable/expense.txt"]
+    store.replace_all([])
+    assert store.find_files("expense", 5) == []
+
+
+def test_reindex_only_embeds_changed_files_and_drops_deleted(tmp_path):
+    content, store = make(tmp_path)
+    build_index(content, store)
+    embedded = []
+    counting = Store(tmp_path / "index", embed_fn=lambda texts: (embedded.extend(texts), fake_embed(texts))[1])
+
+    assert build_index(content, counting)["changed"] == 0 and embedded == []
+
+    (content / "policy" / "leave.txt").write_text("annual leave is now twelve days per year", encoding="utf-8")
+    (content / "forms" / "shareable" / "expense.txt").unlink()
+    r = build_index(content, counting)
+    assert r["changed"] == 1 and r["indexed"] == 1
+    assert all("leave" in t for t in embedded)  # only the edited file was embedded
+    assert "twelve" in counting.query("leave", k=1)[0].text
+    assert counting.find_files("expense", 5) == [] and counting.doc_path(next(iter(counting.signatures()))) == "policy/leave.txt"
+
+
+def test_summary_is_made_only_for_new_downloadable_files_and_used_for_name_search(tmp_path):
+    content, store = make(tmp_path)
+    seen = []
+    def fake_summary(text):
+        seen.append(text)
+        return "ใบเบิกค่าใช้จ่าย"
+    build_index(content, store, summarize=fake_summary)
+    assert seen == ["expense claim form for receipts"]  # leave.txt is not downloadable
+    build_index(content, store, summarize=fake_summary)
+    assert len(seen) == 1  # unchanged file is not summarized again
+    assert "ใบเบิกค่าใช้จ่าย" in store._names.get()["documents"][0]
+
+
+def test_failed_summary_does_not_stop_indexing(tmp_path):
+    content, store = make(tmp_path)
+    def boom(text):
+        raise RuntimeError("api down")
+    assert build_index(content, store, summarize=boom)["indexed"] == 2
