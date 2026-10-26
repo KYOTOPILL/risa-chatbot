@@ -16,11 +16,11 @@ function add(role, text, files = [], err = false) {
   const el = document.createElement("div");
   el.className = `msg ${role === "user" ? "user" : "bot"}${err ? " err" : ""}`;
   el.textContent = text;
-  for (const id of files) {
+  for (const f of files) {
     const a = document.createElement("a");
     a.className = "file";
-    a.href = `/download/${encodeURIComponent(id)}`;
-    a.textContent = "ดาวน์โหลดเอกสาร";
+    a.href = `/download/${encodeURIComponent(f.id)}`;
+    a.textContent = f.name;
     el.append(a);
   }
   log.append(el);

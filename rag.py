@@ -9,9 +9,12 @@ from config import CHAT_MODEL, FILE_MARGIN, HR_CONTACT, MAX_DISTANCE, THAI_MIN_R
 
 NOT_FOUND = f"ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร กรุณาติดต่อ {HR_CONTACT}"
 CANNOT_SEND = "ขออภัย ไม่สามารถส่งไฟล์นี้ให้ได้ค่ะ"
-TIE_MARGIN = 0.05
-MAX_FILES = 3
+FILE_READY = "นี่คือไฟล์ที่เกี่ยวข้องค่ะ"
 HISTORY_TURNS = 6
+ALL_K = 20
+# the small model misses obvious file requests, so a request verb plus a document word counts as one regardless
+ASKS = re.compile(r"ขอ(?!ทราบ)|ส่ง|โหลด|send|download", re.I)
+FILES = re.compile(r"ไฟล์|เอกสาร|แบบฟอร์ม|ฟอร์ม|ใบเสร็จ|ใบสำคัญ|file|form|receipt|document", re.I)
 
 SYSTEM = """You are an office assistant chatbot. Answer the user's question using ONLY the text inside <context>.
 Rules:
@@ -20,12 +23,15 @@ Rules:
 - If the context does not contain the answer, reply with exactly: NOT_FOUND
 - Each context block starts with a modified date. For progress/status questions, end the answer with "(ข้อมูล ณ วันที่ YYYY-MM-DD)" using that date. When documents disagree, prefer the newest and say so. Otherwise do not mention dates.
 - Never refer to documents by number or position (no "document 1", "according to the context"). State the facts directly.
-- Never mention file names, paths, or document ids."""
+- Never mention file names, paths, or document ids.
+- Plain text only: no markdown (no **, no #). End polite sentences with ค่ะ."""
 
 UNDERSTAND = """Given the chat history and the latest user message, reply with JSON only:
 {"question": "<latest message rewritten as a standalone question, same language>",
- "wants_file": <true only if the user asks to be given/sent a document or form file, false if they only ask for information>,
- "category": <one of CATEGORIES that best fits the question, or null>}"""
+ "wants_file": <true if the user asks to be given/sent a document or form file, or asks whether such a file exists or what files are available; false if they only ask for information>,
+ "wants_all": <true if the user wants to see every matching file or a list of what exists, or asks for more files than already given; false if one file is enough>,
+ "category": <one of CATEGORIES that best fits the question, or null>}
+wants_file is true for: "ขอไฟล์ใบลา", "ขอแบบฟอร์มเบิกเงิน", "ขอใบเสร็จ", "มีไฟล์ใบเสร็จไหม", "มีเอกสารอะไรให้โหลดบ้าง", "ส่งสัญญาให้หน่อย", "thesis publication ไม่มีไฟล์หรอ", "มีมากกว่านี้ไม่ใช่หรอ" after files were given. wants_all is true for: "ใบเสร็จมีอะไรบ้าง ขอไฟล์ด้วย", "มีเอกสารอะไรให้โหลดบ้าง", "ขอทุกไฟล์", "มีมากกว่านี้ไหม". It is false for: "ขอใบเสร็จค่าตีพิมพ์". wants_file is false for: "ลาพักร้อนได้กี่วัน", "ค่าเดินทางเบิกได้เท่าไหร่"."""
 
 
 @dataclass
@@ -39,6 +45,7 @@ class Intent:
     question: str
     wants_file: bool
     category: str | None
+    wants_all: bool = False
 
 
 @dataclass
@@ -49,7 +56,7 @@ class Reply:
 
 
 def chat(messages: list[dict], json_mode: bool = False) -> str:
-    body = {"model": CHAT_MODEL, "messages": messages, "reasoning_effort": "minimal"}  # fewest hidden reasoning tokens: faster, cheaper
+    body = {"model": CHAT_MODEL, "messages": messages, "reasoning_effort": "none"}  # fewest hidden reasoning tokens: faster, cheaper
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     res = httpx.post(
@@ -80,8 +87,9 @@ def understand(history: list[Turn], message: str, llm=chat, categories: list[str
         category = data.get("category")
         return Intent(
             question=str(data.get("question") or message),
-            wants_file=bool(data.get("wants_file")),
+            wants_file=bool(data.get("wants_file")) or bool(ASKS.search(message) and FILES.search(message)),
             category=category if category in categories else None,
+            wants_all=bool(data.get("wants_all")),
         )
     except (ValueError, AttributeError, TypeError):
         return fallback
@@ -100,8 +108,8 @@ def _context(hits) -> str:
     return "\n\n".join(f"[แก้ไขล่าสุด {h.mtime}]\n{h.text}" for h in hits)
 
 
-def _generate(question: str, hits, llm, extra: str = "") -> str:
-    user = f"<context>\n{_context(hits)}\n</context>\n\nQuestion: {question}{extra}"
+def _generate(question: str, hits, llm) -> str:
+    user = f"<context>\n{_context(hits)}\n</context>\n\nQuestion: {question}"
     msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
     for _ in range(2):
         text = llm(msgs).strip()
@@ -116,28 +124,26 @@ def answer(history: list[Turn], message: str, store, llm=chat) -> Reply:
     if not message.strip():
         return Reply("")
     intent = understand(history, message, llm, store.categories())
-    found = store.query(intent.question, TOP_K, intent.category)
+    k = ALL_K if intent.wants_all else TOP_K  # a list request needs hits from many different files
+    found = store.query(intent.question, k, intent.category)
     if intent.category:  # the model may pick the wrong category, so also search everything
         seen = {(h.doc_id, h.text) for h in found}
-        found += [h for h in store.query(intent.question, TOP_K) if (h.doc_id, h.text) not in seen]
-    hits = _dedupe(sorted((h for h in found if h.distance <= MAX_DISTANCE), key=lambda h: h.distance))[:TOP_K]
+        found += [h for h in store.query(intent.question, k) if (h.doc_id, h.text) not in seen]
+    hits = _dedupe(sorted((h for h in found if h.distance <= MAX_DISTANCE), key=lambda h: h.distance))[:k]
     if not hits:
         return Reply(NOT_FOUND)
     sources = sorted({h.rel_path for h in hits})
     files: list[str] = []
-    extra = ""
+    best = {}
     if intent.wants_file:
-        best = {}
         top = min(h.distance for h in hits)
-        for h in hits:
+        for h in hits:  # hits are sorted closest first, so the first downloadable one is the best guess
             if h.downloadable and h.distance - top <= FILE_MARGIN:
                 best.setdefault(h.doc_id, h)
-        close = [d for d, h in best.items() if h.distance - min(x.distance for x in best.values()) <= TIE_MARGIN]
-        if len(close) == 1:
-            files = close
-        elif len(close) > 1:
-            extra = "\n\nSeveral different documents could match the request. Ask the user in Thai which one they mean, describing each briefly by its content. Do not give an answer."
-    text = _generate(intent.question, hits, llm, extra)
+                if not intent.wants_all:
+                    break
+    # a file request needs no generated text: the attached file is the answer, and skipping the call is faster and cheaper
+    text = FILE_READY if best else _generate(intent.question, hits, llm)
     if intent.wants_file and not best:
         text = f"{text}\n\n{CANNOT_SEND}"
-    return Reply(text, files[:MAX_FILES], sources)
+    return Reply(text, list(best), sources)

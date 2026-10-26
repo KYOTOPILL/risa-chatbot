@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI
@@ -56,7 +57,9 @@ def chat(body: ChatIn):
         log.exception("answer failed")
         return JSONResponse({"text": ERROR_TEXT, "files": []}, status_code=503)
     log.info("q=%r sources=%s", body.message, reply.sources)
-    return {"text": reply.text, "files": reply.file_doc_ids}
+    store = state.get_store()
+    files = [{"id": i, "name": Path(store.doc_path(i)).name} for i in reply.file_doc_ids if store.doc_path(i)]
+    return {"text": reply.text, "files": files}
 
 
 @app.get("/download/{doc_id}")

@@ -9,7 +9,8 @@ import state
 
 
 class FakeStore:
-    pass
+    def doc_path(self, doc_id):
+        return "policy/ใบลา.pdf"
 
 
 @pytest.fixture
@@ -26,7 +27,7 @@ def test_chat_returns_text_and_file_ids(client):
     with patch("rag.answer", return_value=rag.Reply("ลาพักร้อน 10 วัน", ["abc"], ["policy/leave.pdf"])):
         r = post(client)
     assert r.status_code == 200
-    assert r.json() == {"text": "ลาพักร้อน 10 วัน", "files": ["abc"]}
+    assert r.json() == {"text": "ลาพักร้อน 10 วัน", "files": [{"id": "abc", "name": "ใบลา.pdf"}]}
 
 
 def test_response_never_contains_sources(client):

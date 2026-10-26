@@ -11,7 +11,7 @@ for _line in (ROOT / ".env").read_text().splitlines() if (ROOT / ".env").exists(
     if _k.strip().isidentifier() and _v.strip():
         os.environ.setdefault(_k.strip(), _v.strip().strip("\"'"))
 
-CHAT_MODEL = "gpt-5-nano"  # cheapest OpenAI chat model; needs OPENAI_API_KEY env var
+CHAT_MODEL = "gpt-5.4-nano"  # cheapest OpenAI chat model; needs OPENAI_API_KEY env var
 EMBED_MODEL = "bge-m3"
 
 CHUNK_SIZE = 800

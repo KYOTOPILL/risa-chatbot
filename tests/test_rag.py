@@ -69,6 +69,12 @@ def test_wants_file_returns_only_downloadable_doc_ids():
     assert r.file_doc_ids == ["b"]
 
 
+def test_file_request_sends_file_even_when_text_has_no_answer():
+    llm = FakeLLM(["NOT_FOUND"], intent={"question": "q", "wants_file": True, "category": None})
+    r = answer([], "มีไฟล์ใบเสร็จไหม", FakeStore([hit(downloadable=True)]), llm=llm)
+    assert r.file_doc_ids == ["d1"] and r.text == rag.FILE_READY
+
+
 def test_nondownloadable_file_request_says_cannot_send():
     llm = FakeLLM([THAI_OK], intent={"question": "q", "wants_file": True, "category": None})
     r = answer([], "ขอไฟล์", FakeStore([hit(downloadable=False)]), llm=llm)
@@ -80,12 +86,24 @@ def test_info_question_gives_no_file_even_if_downloadable():
     assert r.file_doc_ids == []
 
 
-def test_several_close_downloadable_docs_ask_which_one():
-    hits = [hit("a", downloadable=True, distance=0.20), hit("b", downloadable=True, distance=0.22)]
-    llm = FakeLLM(["ต้องการเอกสารฉบับไหนคะ"], intent={"question": "q", "wants_file": True, "category": None})
+def test_several_close_downloadable_docs_send_closest_without_asking():
+    hits = [hit("b", downloadable=True, distance=0.22), hit("a", downloadable=True, distance=0.20)]
+    llm = FakeLLM(["แนบไฟล์ให้แล้วค่ะ"], intent={"question": "q", "wants_file": True, "category": None})
     r = answer([], "ขอแบบฟอร์ม", FakeStore(hits), llm=llm)
-    assert r.file_doc_ids == []
-    assert "ถาม" in llm.calls[-1][0][-1]["content"] or "which" in llm.calls[-1][0][-1]["content"].lower()
+    assert r.file_doc_ids == ["a"]
+
+
+def test_request_verb_plus_document_word_is_a_file_request_even_if_model_says_no():
+    bad = FakeLLM([], intent={"question": "q", "wants_file": False, "category": None})
+    assert understand([], "ขอใบเสร็จค่าตีพิมพ์", llm=bad).wants_file
+    assert not understand([], "ขอทราบวันลาพักร้อน", llm=bad).wants_file
+
+
+def test_list_request_sends_every_close_downloadable_doc():
+    hits = [hit("a", downloadable=True, distance=0.20), hit("b", downloadable=True, distance=0.22), hit("c", downloadable=False, distance=0.23)]
+    llm = FakeLLM([], intent={"question": "q", "wants_file": True, "wants_all": True, "category": None})
+    r = answer([], "มีอะไรบ้าง", FakeStore(hits), llm=llm)
+    assert r.file_doc_ids == ["a", "b"]
 
 
 def test_instruction_in_chunk_is_fenced_as_data():
