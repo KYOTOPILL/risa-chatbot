@@ -1,10 +1,17 @@
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CONTENT_DIR = ROOT / "content"
 INDEX_DIR = ROOT / "index"
 
-CHAT_MODEL = "qwen3:8b"  # confirm newest Qwen instruct ~8B tag with `ollama list`
+# .env holds OPENAI_API_KEY; real environment variables win
+for _line in (ROOT / ".env").read_text().splitlines() if (ROOT / ".env").exists() else []:
+    _k, _, _v = _line.partition("=")
+    if _k.strip().isidentifier() and _v.strip():
+        os.environ.setdefault(_k.strip(), _v.strip().strip("\"'"))
+
+CHAT_MODEL = "gpt-5-nano"  # cheapest OpenAI chat model; needs OPENAI_API_KEY env var
 EMBED_MODEL = "bge-m3"
 
 CHUNK_SIZE = 800

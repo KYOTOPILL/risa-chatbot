@@ -2,10 +2,11 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>RiSA จัดการเอกสาร</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/admin.css">
+<script type="speculationrules">{"prerender":[{"urls":["/"]}]}</script>
 </head>
 <body>
 <div class="adm">
@@ -14,39 +15,53 @@
     <a class="ghost" href="/">ไปหน้าแชท</a>
   </header>
 
-  <section class="card">
-    <h2>อัปโหลดเอกสาร</h2>
-    <form id="up">
-      <label class="drop" id="drop">
-        <input id="files" type="file" multiple accept=".pdf,.docx,.txt,.md">
-        <span id="picked">ลากไฟล์มาวาง หรือคลิกเพื่อเลือก (PDF, DOCX, TXT, MD)</span>
-      </label>
-      <div class="row">
-        <label>หมวดหมู่
-          <input id="category" list="cats" maxlength="60" placeholder="เช่น policy, forms (เว้นว่าง = general)">
-          <datalist id="cats"></datalist>
-        </label>
-        <label class="check"><input id="dl" type="checkbox"> ให้ดาวน์โหลดผ่านแชทได้</label>
-        <button class="primary" id="go" type="submit">อัปโหลด</button>
-      </div>
-    </form>
-    <p id="msg" class="status" role="status"></p>
-  </section>
-
-  <section class="card">
+  <section class="card drive" id="list">
     <div class="between">
-      <h2>เอกสารทั้งหมด <span id="count" class="muted"></span></h2>
-      <button class="ghost" id="reindex" type="button">อัปเดตดัชนีใหม่</button>
+      <nav id="crumbs" class="crumbs" aria-label="โฟลเดอร์"></nav>
+      <div class="tools">
+        <button class="ghost" id="newdir" type="button">โฟลเดอร์ใหม่</button>
+        <button class="primary" id="pick" type="button">อัปโหลดไฟล์</button>
+        <input id="files" type="file" multiple hidden accept=".pdf,.docx,.txt,.md">
+        <input id="repl" type="file" hidden accept=".pdf,.docx,.txt,.md">
+      </div>
     </div>
+
+    <div id="sel" class="selbar hidden">
+      <span id="selcount" class="count"></span>
+      <button class="ghost" id="mvsel" type="button">ย้ายไป…</button>
+      <button class="ghost danger" id="delsel" type="button">ลบ</button>
+      <button class="ghost" id="clear" type="button">ยกเลิกการเลือก</button>
+    </div>
+
     <div class="scroll">
       <table>
-        <thead><tr><th>ไฟล์</th><th>หมวดหมู่</th><th>ดาวน์โหลด</th><th>ขนาด</th><th>แก้ไข</th><th></th></tr></thead>
-        <tbody id="rows"></tbody>
+        <thead><tr>
+          <th class="chk"><input id="all" type="checkbox" aria-label="เลือกทั้งหมด"></th>
+          <th>ชื่อ</th><th>ดาวน์โหลดผ่านแชท</th><th>ขนาด</th><th>แก้ไข</th><th></th>
+        </tr></thead>
+        <tbody id="rows"><tr class="sk"><td></td><td><span></span></td><td></td><td><span></span></td><td><span></span></td><td></td></tr><tr class="sk"><td></td><td><span></span></td><td></td><td><span></span></td><td><span></span></td><td></td></tr><tr class="sk"><td></td><td><span></span></td><td></td><td><span></span></td><td><span></span></td><td></td></tr><tr class="sk"><td></td><td><span></span></td><td></td><td><span></span></td><td><span></span></td><td></td></tr></tbody>
       </table>
     </div>
-    <p id="empty" class="muted hidden">ยังไม่มีเอกสาร</p>
+    <p id="empty" class="muted hidden">ยังไม่มีเอกสาร ลากไฟล์มาวางที่นี่เพื่ออัปโหลด</p>
+
+    <div class="between foot">
+      <p id="msg" class="status" role="status"></p>
+      <button class="ghost" id="reindex" type="button">อัปเดตดัชนีใหม่</button>
+    </div>
   </section>
 </div>
+
+<div id="toast" class="toast hidden" role="status"><span id="tmsg"></span><button id="undo" class="link" type="button">เลิกทำ</button></div>
+
+<dialog id="mv">
+  <form method="dialog">
+    <label>ย้ายไปที่ <select id="dest"></select></label>
+    <menu>
+      <button class="ghost" value="cancel">ยกเลิก</button>
+      <button class="primary" value="ok">ย้าย</button>
+    </menu>
+  </form>
+</dialog>
 <script src="/static/admin.js"></script>
 </body>
 </html>

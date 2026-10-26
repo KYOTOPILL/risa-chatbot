@@ -8,8 +8,8 @@ Design: `docs/superpowers/specs/`. Plan: `docs/superpowers/plans/`.
 1. Install [Ollama](https://ollama.com), then:
    ```
    ollama pull bge-m3
-   ollama pull qwen3:8b      # or the newest Qwen instruct ~8B tag; set CHAT_MODEL in config.py to match `ollama list`
    ```
+   Chat uses the OpenAI API (`gpt-5.4-nano`): put `OPENAI_API_KEY=sk-...` in a gitignored `.env` file.
 2. `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 
 ## Content folder
@@ -28,7 +28,7 @@ Put **only documents every staff member may see** in `content/` (path set by `CO
 Server later: same code, add `--host 0.0.0.0` to expose on the office LAN. Restart the server after changing `config.py`. Change models in `config.py` (`CHAT_MODEL`, `EMBED_MODEL`) and the HR contact in `HR_CONTACT` (placeholder now).
 
 ## Manage files (admin page)
-Open http://localhost:8000/admin on the server machine to upload files (pick a category, tick "downloadable" to put them in `shareable/`), delete files, and re-index. Uploads and deletes re-index automatically; chat waits during re-indexing. Same-name uploads replace the old file. This page works only from the server machine itself (loopback); add real login before exposing it to the LAN.
+Open http://localhost:8000/admin on the server machine. It works like a drive: folders (= categories, one level) with a breadcrumb; drag files onto the list or a folder to upload; tick rows to move (drag onto a folder, or "ย้ายไป…") or bulk-delete; double-click a name to rename; the per-row switch makes a file downloadable through chat (it moves the file into `shareable/`). Every change saves at once and the index re-builds by itself a few seconds after the last change (chat waits while it runs); "อัปเดตดัชนีใหม่" forces it. Emptied folders disappear. Same-name uploads replace the old file. Without `ADMIN_PASSWORD` the page works only from the server machine itself (loopback). To expose it, start the server with `ADMIN_PASSWORD=<long random string>`; the browser then asks for a login (user `admin`). Set it on any deployed server: behind a reverse proxy on the same machine every visitor looks like loopback, and a set password is the only thing that stops them. Serve over HTTPS, since Basic auth sends the password in every request.
 
 ## Check correctness
 ```

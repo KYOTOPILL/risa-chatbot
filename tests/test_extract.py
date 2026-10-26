@@ -47,3 +47,9 @@ def test_extract_text_cleans_thai_glyphs(tmp_path):
     p = tmp_path / "a.txt"
     p.write_text("ผาน", encoding="utf-8")
     assert extract_text(p) == "ผ่าน"
+
+
+def test_split_sara_am_is_recomposed():
+    from extract import clean_thai
+
+    assert clean_thai("ส\u0e4d\u0e32คัญ ต\u0e4d\u0e32บล") == "สำคัญ ตำบล"

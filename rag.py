@@ -1,8 +1,9 @@
 import json
+import os
 import re
 from dataclasses import dataclass, field
 
-import ollama
+import httpx
 
 from config import CHAT_MODEL, FILE_MARGIN, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
 
@@ -48,8 +49,17 @@ class Reply:
 
 
 def chat(messages: list[dict], json_mode: bool = False) -> str:
-    res = ollama.chat(model=CHAT_MODEL, messages=messages, format="json" if json_mode else None, think=False)
-    return re.sub(r"<think>.*?</think>", "", res["message"]["content"], flags=re.S).strip()
+    body = {"model": CHAT_MODEL, "messages": messages, "reasoning_effort": "minimal"}  # fewest hidden reasoning tokens: faster, cheaper
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    res = httpx.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+        json=body,
+        timeout=60,
+    )
+    res.raise_for_status()
+    return res.json()["choices"][0]["message"]["content"].strip()
 
 
 def is_mostly_thai(text: str) -> bool:

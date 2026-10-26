@@ -80,8 +80,11 @@ input.addEventListener("keydown", (e) => {
 document.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => ask(c.textContent)));
 $("new").addEventListener("click", () => {
   history = []; save();
-  log.querySelectorAll(".msg").forEach((m) => m.remove());
-  welcome.classList.remove("hidden");
+  const reset = () => {
+    log.querySelectorAll(".msg").forEach((m) => m.remove());
+    welcome.classList.remove("hidden");
+  };
+  document.startViewTransition ? document.startViewTransition(reset) : reset();
   input.focus();
 });
 

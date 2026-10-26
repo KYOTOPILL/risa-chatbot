@@ -134,16 +134,22 @@ def test_file_request_for_nondownloadable_ignores_far_downloadable_hit():
     assert r.file_doc_ids == [] and rag.CANNOT_SEND in r.text
 
 
-def test_chat_disables_thinking_and_strips_think_block(monkeypatch):
+def test_chat_posts_to_openai_with_json_mode(monkeypatch):
     seen = {}
 
-    def fake_chat(**kw):
-        seen.update(kw)
-        return {"message": {"content": "<think>reasoning in English</think>\nตอบเป็นไทย"}}
+    class Res:
+        def raise_for_status(self): pass
+        def json(self): return {"choices": [{"message": {"content": " ตอบเป็นไทย\n"}}]}
 
-    monkeypatch.setattr(rag.ollama, "chat", fake_chat)
-    assert rag.chat([{"role": "user", "content": "x"}]) == "ตอบเป็นไทย"
-    assert seen["think"] is False
+    def fake_post(url, **kw):
+        seen.update(kw, url=url)
+        return Res()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setattr(rag.httpx, "post", fake_post)
+    assert rag.chat([{"role": "user", "content": "x"}], json_mode=True) == "ตอบเป็นไทย"
+    assert seen["headers"]["Authorization"] == "Bearer k"
+    assert seen["json"]["response_format"] == {"type": "json_object"}
 
 
 def test_prompt_does_not_number_documents_and_limits_dates():

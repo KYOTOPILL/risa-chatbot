@@ -33,6 +33,15 @@ class ChatIn(BaseModel):
     history: list[TurnIn] = Field(default_factory=list, max_length=12)
 
 
+class RevalidatingStatic(StaticFiles):
+    """Without a Cache-Control header browsers reuse stale js/css after an edit."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(admin.router)
 
@@ -63,4 +72,4 @@ def index():
     return FileResponse(WEB / "index.html")
 
 
-app.mount("/static", StaticFiles(directory=WEB), name="static")
+app.mount("/static", RevalidatingStatic(directory=WEB), name="static")

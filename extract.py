@@ -28,7 +28,8 @@ _PUA_RE = re.compile("[\ue000-\uf8ff]")
 
 def clean_thai(text: str) -> str:
     # unknown private-use characters are dropped: they carry no meaning outside their font
-    return _PUA_RE.sub(lambda m: _PUA.get(ord(m.group()), ""), text)
+    text = _PUA_RE.sub(lambda m: _PUA.get(ord(m.group()), ""), text)
+    return text.replace("\u0e4d\u0e32", "\u0e33")  # PDFs often split sara am into nikhahit + sara aa
 
 
 def extract_text(path: Path) -> str:
