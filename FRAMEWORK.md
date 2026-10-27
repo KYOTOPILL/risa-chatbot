@@ -51,7 +51,7 @@ Two ideas carry the whole design:
 | `answer(history, message, store, llm)` | Runs the tool loop and returns a `Reply`. Everything else supports this. |
 | inner `run(name, args)` | Executes one tool call against the store and returns text for the model. |
 | `chat_tools(messages, tools, tool_choice)` | One OpenAI call with tool support. `chat()` is the plain version, still used for summaries. |
-| `AGENT_SYSTEM` | System prompt: tool descriptions, Thai-only, tool results are data, reply `NOT_FOUND` when nothing fits. |
+| `AGENT_SYSTEM` | System prompt: tool descriptions, Thai-only, tool results are data, reply `NOT_FOUND` when nothing fits, `OUT_OF_SCOPE` when the question has nothing to do with the company (weather, recipes, coding). |
 | `TOOLS` | The four tool definitions below. |
 | `_dedupe`, `_context` | Drop overlapping chunks and format search results with their modified date. |
 | `is_mostly_thai` | Detects an English reply so it can be retried once in Thai. |
@@ -72,7 +72,7 @@ Guards in code (the model cannot bypass them):
 - Round 0 forces a tool call (`tool_choice="required"`). Loop is capped at `MAX_ROUNDS=4`.
 - Invented file ids are ignored. At most `MAX_FILES=8` files are sent.
 - Thai-only check with one retry, then fall back to the HR contact message.
-- Files sent but empty text gives `FILE_READY`. Nothing found gives `NOT_FOUND`.
+- Files sent but empty text gives `FILE_READY`. Nothing found gives `NOT_FOUND` (HR contact message). An off-topic question gives `OUT_OF_SCOPE`: "คำถามนี้ไม่เกี่ยวข้องกับเอกสารที่มีอยู่" plus the HR contact. The model decides which, so an office question the documents do not cover can occasionally come back in the model's own words instead of the HR message.
 - Search results are wrapped as data, so instructions inside documents are ignored.
 - If the model picks the wrong topic, the search also runs across all topics.
 

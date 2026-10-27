@@ -86,6 +86,13 @@ def test_no_relevant_text_gives_the_hr_message():
     assert r.text.startswith("ขออภัย") and HR_CONTACT in r.text and r.file_doc_ids == []
 
 
+def test_unrelated_question_gets_the_not_related_reply_with_hr_contact():
+    llm = FakeLLM(call("search_documents", query="อากาศ"), say("OUT_OF_SCOPE"))
+    r = answer([], "วันนี้อากาศเป็นอย่างไร", FakeStore(), llm=llm)
+    assert "ไม่เกี่ยวข้อง" in r.text and HR_CONTACT in r.text and r.file_doc_ids == []
+    assert len(llm.calls) == 2  # no English-retry call for the marker
+
+
 def test_wrong_topic_does_not_hide_better_hits():
     store = FakeStore([hit("a", category="policy"), hit("b", category="forms", distance=0.1)])
     llm = FakeLLM(call("search_documents", query="q", topic="policy"), say(THAI_OK))
