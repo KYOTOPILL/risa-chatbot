@@ -50,17 +50,17 @@ class Store:
 
     # Summaries are remembered by file signature (size + mtime), not by path: moving or renaming a file, or
     # switching downloadable off and on, keeps the same content, so it keeps its summary and costs no new API call.
-    def cached_summary(self, sig: str) -> str:
+    def _summaries(self) -> dict[str, str]:
         try:
-            return json.loads(self._summary_file.read_text(encoding="utf-8")).get(sig, "")
+            return json.loads(self._summary_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return ""
+            return {}
+
+    def cached_summary(self, sig: str) -> str:
+        return self._summaries().get(sig, "")
 
     def remember_summary(self, sig: str, summary: str) -> None:
-        try:
-            data = json.loads(self._summary_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {}
+        data = self._summaries()
         data[sig] = summary
         tmp = self._summary_file.with_suffix(".part")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -78,9 +78,6 @@ class Store:
     def signatures(self) -> dict[str, str]:
         """doc_id -> signature of the file version that is indexed."""
         return {m["doc_id"]: m.get("sig", "") for m in self._col.get(include=["metadatas"])["metadatas"]}
-
-    def replace_all(self, items: list[tuple[DocMeta, list[str]]]) -> None:
-        self.update(items, set())
 
     def update(self, items: list[tuple[DocMeta, list[str]]], keep: set[str]) -> None:
         """Index `items` (new or changed docs); drop every indexed doc that is neither in `items` nor in `keep`."""

@@ -98,19 +98,9 @@ def test_index_page_served_in_thai(client):
     assert r.status_code == 200 and "RiSA" in r.text and 'lang="th"' in r.text
 
 
-def test_mockup_page_and_scripts_served_without_model_call(client):
-    with patch("rag.answer") as ans:
-        page = client.get("/mockup")
-        assert page.status_code == 200 and "mockup.js" in page.text and "icons.js" in page.text
-        assert client.get("/static/mockup.js").status_code == 200 and "function fileIcon" in client.get("/static/icons.js").text
-    assert ans.call_count == 0
+def test_icons_script_served_and_linked(client):
+    assert "function fileIcon" in client.get("/static/icons.js").text
     assert "icons.js" in client.get("/").text
-
-
-def test_admin_mockup_served_without_login_or_model_call(client):
-    page = client.get("/admin-mockup")
-    assert page.status_code == 200 and "admin-mockup.js" in page.text
-    assert client.get("/static/admin-mockup.js").status_code == 200
 
 
 def test_concurrent_requests_are_serialised(client):

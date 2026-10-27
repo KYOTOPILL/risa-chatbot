@@ -108,7 +108,7 @@ def test_find_files_matches_file_name_and_only_downloadable(tmp_path):
     build_index(content, store)
     hits = store.find_files("expense", 5)
     assert [h.rel_path for h in hits] == ["forms/shareable/expense.txt"]
-    store.replace_all([])
+    store.update([], set())
     assert store.find_files("expense", 5) == []
 
 

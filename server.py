@@ -87,14 +87,4 @@ def index():
     return FileResponse(WEB / "index.html")
 
 
-@app.get("/mockup")
-def mockup():  # static design preview: fake chat, no model calls
-    return FileResponse(WEB / "mockup.html")
-
-
-@app.get("/admin-mockup")
-def admin_mockup():  # static design preview: fake files, touches nothing
-    return FileResponse(WEB / "admin-mockup.html")
-
-
 app.mount("/static", RevalidatingStatic(directory=WEB), name="static")

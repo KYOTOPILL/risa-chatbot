@@ -46,11 +46,8 @@ def _post(body: dict) -> dict:
     return data["choices"][0]["message"]
 
 
-def chat(messages: list[dict], json_mode: bool = False) -> str:
-    body = {"messages": messages}
-    if json_mode:
-        body["response_format"] = {"type": "json_object"}
-    return (_post(body)["content"] or "").strip()
+def chat(messages: list[dict]) -> str:
+    return (_post({"messages": messages})["content"] or "").strip()
 
 
 def chat_tools(messages: list[dict], tools: list[dict] | None = None, tool_choice: str = "auto") -> dict:
@@ -170,8 +167,6 @@ def answer(history: list[Turn], message: str, store, llm=chat_tools) -> Reply:
         text = (retry.get("content") or "").strip()
         if not is_mostly_thai(text):
             text = ""
-    if sent and (not text or text.strip("`'\" .") == "NOT_FOUND"):
-        text = FILE_READY
-    elif not text or text.strip("`'\" .") == "NOT_FOUND":
-        text = NOT_FOUND
+    if not text or text.strip("`'\" .") == "NOT_FOUND":
+        text = FILE_READY if sent else NOT_FOUND
     return Reply(text, sent, sorted(sources))

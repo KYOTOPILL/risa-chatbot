@@ -183,7 +183,7 @@ def test_is_mostly_thai():
     assert not is_mostly_thai("")
 
 
-def test_chat_posts_to_openai_with_json_mode(monkeypatch):
+def test_chat_posts_to_openai(monkeypatch):
     seen = {}
 
     class Res:
@@ -197,9 +197,8 @@ def test_chat_posts_to_openai_with_json_mode(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setattr(rag.httpx, "post", fake_post)
-    assert rag.chat([{"role": "user", "content": "x"}], json_mode=True) == "ตอบเป็นไทย"
+    assert rag.chat([{"role": "user", "content": "x"}]) == "ตอบเป็นไทย"
     assert seen["headers"]["Authorization"] == "Bearer k"
-    assert seen["json"]["response_format"] == {"type": "json_object"}
 
 
 def test_usage_is_summed_and_chat_tools_caps_output(monkeypatch):

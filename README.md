@@ -1,5 +1,4 @@
 # Office RAG Chatbot
-Design: `docs/superpowers/specs/`. Plan: `docs/superpowers/plans/`.
 
 Local Thai chatbot (FastAPI backend + plain HTML/CSS/JS page in `web/`) over office documents. Answers in Thai from the indexed documents only, says "not found" plus the HR contact otherwise, and hands over a file only when asked and only if it is marked downloadable.
 
