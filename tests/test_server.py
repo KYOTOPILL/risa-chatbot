@@ -33,6 +33,30 @@ def post(client, message="ลากี่วัน", history=None):
     return client.post("/api/chat", json={"message": message, "history": history or []})
 
 
+def test_chat_questions_run_in_parallel(client):
+    import threading
+    import time
+
+    running = peak = 0
+    guard = threading.Lock()
+
+    def slow_answer(history, message, store):
+        nonlocal running, peak
+        with guard:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.3)
+        with guard:
+            running -= 1
+        return rag.Reply("ok")
+
+    with patch("rag.answer", slow_answer):
+        threads = [threading.Thread(target=post, args=(client, f"q{i}")) for i in range(4)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+    assert peak > 1
+
+
 def test_chat_returns_text_and_file_ids(client):
     with patch("rag.answer", return_value=rag.Reply("ลาพักร้อน 10 วัน", ["abc"], ["policy/leave.pdf"])):
         r = post(client)
@@ -101,27 +125,6 @@ def test_index_page_served_in_thai(client):
 def test_icons_script_served_and_linked(client):
     assert "function fileIcon" in client.get("/static/icons.js").text
     assert "icons.js" in client.get("/").text
-
-
-def test_concurrent_requests_are_serialised(client):
-    import threading
-    import time
-
-    active, peak = 0, 0
-
-    def slow(history, message, store):
-        nonlocal active, peak
-        active += 1
-        peak = max(peak, active)
-        time.sleep(0.05)
-        active -= 1
-        return rag.Reply("ตอบ")
-
-    with patch("rag.answer", side_effect=slow):
-        ts = [threading.Thread(target=post, args=(client,)) for _ in range(4)]
-        [t.start() for t in ts]
-        [t.join() for t in ts]
-    assert peak == 1
 
 
 def test_repeated_question_without_history_is_answered_from_cache(client):

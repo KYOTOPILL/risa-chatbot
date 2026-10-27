@@ -54,8 +54,7 @@ def chat(body: ChatIn):
     try:
         reply = state.cache.get(key)
         if reply is None:
-            with state.lock:
-                reply = rag.answer(history, body.message, state.get_store())
+            reply = rag.answer(history, body.message, state.get_store())
             if key and len(state.cache) < state.CACHE_MAX:  # full: stop adding, a reindex clears it
                 state.cache[key] = reply
     except Exception:

@@ -147,7 +147,7 @@ For "ลาพักร้อนกี่วัน" the model calls `search_docu
 - Eval runs are noisy. One run shows plus or minus a point or two.
 - Typo request "ขอดูเอหสารทุน" is ambiguous now that two topics exist.
 - "All receipts" sometimes returns only some of them.
-- `state.lock` is held for the whole tool loop, so concurrent staff queue longer.
+- Chat questions run in parallel (one thread each, up to 40 in uvicorn's pool); extra ones wait in that pool. A re-index no longer blocks chat. Chat runs as one process: the answer cache is per process, so do not start several workers without moving it out.
 - Image-only (scanned) PDFs are not indexed because there is no OCR.
 - Spreadsheets: formulas show their last saved value (nothing if the file was never opened in Excel), charts and images are ignored, and rows past 3000 per sheet are cut. Slide images and diagrams are ignored.
 - Summaries of near-identical receipt forms read alike.
@@ -160,7 +160,7 @@ For "ลาพักร้อนกี่วัน" the model calls `search_docu
 ## 7. Next steps worth doing
 
 1. Commit the tool-based migration.
-2. Narrow the `state.lock` scope so OpenAI calls run outside it.
+2. Per-IP rate limit on `/api/chat` if the bot is exposed beyond staff.
 3. Collect real staff requests and add them to `evals/questions.json`.
 4. Re-check `FIND_MAX` and rerun the eval once more topics and files exist.
 5. Add OCR if scanned PDFs matter.

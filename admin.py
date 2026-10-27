@@ -194,7 +194,7 @@ def move(body: MoveIn):
 
 @router.post("/api/admin/reindex")
 def reindex():
-    with state.lock:  # chat waits while the index is rebuilt
+    with state.lock:  # only one re-index at a time; chat keeps answering from the old index until the swap
         try:
             return build_index(CONTENT_DIR, state.get_store(), summarize)
         finally:

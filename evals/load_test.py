@@ -13,12 +13,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--users", type=int, default=3)
     n = ap.parse_args().users
-    store, lock, times = Store(), threading.Lock(), []
+    store, times = Store(), []
 
     def one() -> None:
         t = time.time()
-        with lock:  # same single-model queue as the app
-            answer([], QUESTION, store)
+        answer([], QUESTION, store)  # the app runs questions in parallel too
         times.append(time.time() - t)
 
     start = time.time()

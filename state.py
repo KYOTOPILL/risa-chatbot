@@ -3,7 +3,7 @@ from functools import lru_cache
 
 from store import Store
 
-# one local model serves everyone: the lock makes chat questions and re-indexing wait their turn
+# one re-index at a time; chat never waits for it (each question runs in its own thread, the model servers queue themselves)
 lock = threading.Lock()
 
 
