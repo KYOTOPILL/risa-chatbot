@@ -1,7 +1,7 @@
 # RiSA: how the framework works
 
 RiSA is a Thai-language chatbot that answers staff questions from company documents and sends the files they ask for.
-Stack: FastAPI + plain HTML/JS, Chroma vector store, local `bge-m3` embeddings (Ollama), OpenAI chat model `gpt-5.4-nano`.
+Stack: FastAPI + plain HTML/JS, Chroma vector store, local `bge-m3` embeddings (Ollama), chat model `gpt-5.4-nano` via OpenAI by default; `RISA_CHAT_BASE_URL` + `RISA_CHAT_MODEL` point it at any OpenAI-compatible server (e.g. local Ollama `qwen3:8b`).
 
 ## 1. The big picture
 

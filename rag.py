@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from config import CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
+from config import CHAT_BASE_URL, CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
 
 NOT_FOUND = f"ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร กรุณาติดต่อ {HR_CONTACT}"
 FILE_READY = "นี่คือไฟล์ที่เกี่ยวข้องค่ะ"
@@ -32,8 +32,8 @@ class Reply:
 def _post(body: dict) -> dict:
     body = {"model": CHAT_MODEL, "reasoning_effort": "none", **body}  # no hidden reasoning tokens: faster, cheaper
     res = httpx.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+        f"{CHAT_BASE_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', 'local')}"},  # local servers ignore the key
         json=body,
         timeout=60,
     )

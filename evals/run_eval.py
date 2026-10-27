@@ -54,6 +54,9 @@ if __name__ == "__main__":
     store = Store()
     cases = json.loads((Path(__file__).parent / "questions.json").read_text(encoding="utf-8"))
     names = lambda ids: [Path(store.doc_path(i)).name for i in ids]
+    if len(sys.argv) > 1:  # `run_eval 8`: only 8 evenly spaced cases, to keep API cost down
+        n = int(sys.argv[1])
+        cases = cases[:: max(1, len(cases) // n)][:n]
     results = run(cases, lambda history, q: answer(history, q, store), names)
     for r in results:
         print("PASS" if r.passed else "FAIL", r.q, *r.reasons, sep="  ")

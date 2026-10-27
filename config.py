@@ -11,7 +11,9 @@ for _line in (ROOT / ".env").read_text().splitlines() if (ROOT / ".env").exists(
     if _k.strip().isidentifier() and _v.strip():
         os.environ.setdefault(_k.strip(), _v.strip().strip("\"'"))
 
-CHAT_MODEL = os.environ.get("RISA_CHAT_MODEL", "gpt-5.4-nano")  # cheapest OpenAI chat model; needs OPENAI_API_KEY env var
+# Any OpenAI-compatible chat endpoint. API (default): needs OPENAI_API_KEY. Local: RISA_CHAT_BASE_URL=http://localhost:11434/v1 RISA_CHAT_MODEL=qwen3:8b
+CHAT_BASE_URL = os.environ.get("RISA_CHAT_BASE_URL", "https://api.openai.com/v1")
+CHAT_MODEL = os.environ.get("RISA_CHAT_MODEL", "gpt-5.4-nano")  # cheapest OpenAI chat model
 EMBED_MODEL = "bge-m3"
 
 CHUNK_SIZE = 800

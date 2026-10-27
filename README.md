@@ -8,7 +8,7 @@ Local Thai chatbot (FastAPI backend + plain HTML/CSS/JS page in `web/`) over off
    ```
    ollama pull bge-m3
    ```
-   Chat uses the OpenAI API (`gpt-5.4-nano`): put `OPENAI_API_KEY=sk-...` in a gitignored `.env` file.
+   Chat uses the OpenAI API (`gpt-5.4-nano`): put `OPENAI_API_KEY=sk-...` in a gitignored `.env` file. To try a local model instead, `ollama pull qwen3:8b` and start with `RISA_CHAT_BASE_URL=http://localhost:11434/v1 RISA_CHAT_MODEL=qwen3:8b` (any OpenAI-compatible server works); compare with `python -m evals.run_eval`.
 2. `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 
 ## Content folder
