@@ -10,7 +10,7 @@ Stack: FastAPI + plain HTML/JS, Chroma vector store, local `bge-m3` embeddings (
         |
         v
   ingest.build_index  --->  Store (Chroma)
-   - extract text             - "docs"  collection: text chunks     (for answering questions)
+   - extract text (+xlsx,pptx) - "docs"  collection: text chunks     (for answering questions)
    - chunk 800/100            - "names" collection: one entry per   (for finding files)
    - embed (bge-m3)             downloadable file = name + Thai summary
    - LLM summary (new files)
@@ -95,6 +95,7 @@ Guards in code (the model cannot bypass them):
 - `build_index(content_dir, store, summarize)` walks `content/`, skips files whose signature is unchanged, and returns `{"indexed","changed","skipped"}`.
 - `summarize(text)` asks the model for a Thai summary once for every new or changed file, downloadable or not, and remembers it by file signature, so a description never depends on the downloadable switch. A file whose summary is missing (for example indexed before this rule, or a failed call) is indexed again on the next reindex. Only downloadable files' summaries go into the name index used by file requests. A failure is logged and the file is still indexed.
 - `DocMeta` gained `summary` and `sig`.
+- `extract.py`: `extract_text` reads PDF (pymupdf), DOCX, XLSX (`_xlsx`), PPTX (`_pptx`), TXT and MD. `_xlsx` writes one paragraph per row as `[Sheet] Header: value | Header: value` (first non-empty row is the header, empty rows and cells are skipped, at most `MAX_SHEET_ROWS=3000` rows per sheet, cached formula values), so chunking never cuts a row and each value keeps its column name. `_pptx` writes one paragraph per slide: text boxes, tables (cells joined by ` | `), grouped shapes and speaker notes; slides with no text are skipped. Old `.xls` and `.ppt` are not supported (`SUPPORTED_EXTS` in `config.py`, also the upload picker in `admin.html`). New dependencies: `openpyxl`, `python-pptx`.
 
 ### Other files
 
@@ -105,7 +106,7 @@ Guards in code (the model cannot bypass them):
 - `web/admin-mockup.html` + `.js`, served at `/admin-mockup` (no login, fake data, nothing saved): preview of the file manager with fake files. It uses the real `admin.css`. Its JS is a separate simplified copy of `admin.js`, so mirror layout changes by hand. Edit `TREE` to try other content.
 - Chat screen (`web/app.js`, `style.css`): each reply is a row with a bot avatar (RiSA), the bubble and a time stamp shown on hover (not restored after a refresh). Each file is a card (`.fcard`): type icon, name (2 lines max), Thai summary (2 lines max), `TYPE · size`, download arrow. While waiting, the status text rotates through `WAITING` (it is not tied to the real tool step: that needs streaming). Old behaviour kept: renders each file as a link, and saves sent file names in history so "the other one" works.
 - `admin.py`: reindex calls `build_index(..., summarize)`. `/api/admin/files` rows now include `summary`.
-- File manager (`web/admin.html`, `admin.js`, `admin.css`): breadcrumb, an index status strip (green = chat has the latest files, amber = changes waiting for the automatic reindex, spinner = updating, red = error; button forces an update), a selection bar that slides in only when files are ticked, folder rows (count, total size, last edit), file rows (type icon, Thai summary, and a `ดาวน์โหลดในแชท` column with an on/off switch that moves the file in or out of the `shareable` folder; the selection bar has `เปิดให้ดาวน์โหลด` / `ปิดการดาวน์โหลด` for many files at once) and a `⋯` menu per row (rename, move, replace, delete in red, with the undo toast). Uploading (button or drag and drop) first opens a dialog: `ให้ดาวน์โหลดผ่านแชทได้` is ticked by default, so new files can be found by file requests; untick it for internal-only documents. Drag and drop move, double-click rename and the automatic reindex 2.5 s after a change are unchanged.
+- File manager (`web/admin.html`, `admin.js`, `admin.css`): breadcrumb, an index status strip (green = chat has the latest files, amber = changes waiting for the automatic reindex, spinner = updating, red = error; button forces an update), a selection bar that slides in only when files are ticked, folder rows (count, total size, last edit), file rows (type icon, name with a small `i` button that opens the AI-written Thai summary in a popover, and a `ดาวน์โหลดในแชท` column with an on/off switch that moves the file in or out of the `shareable` folder; the selection bar has `เปิดให้ดาวน์โหลด` / `ปิดการดาวน์โหลด` for many files at once) and a `⋯` menu per row (rename, move, replace, delete in red, with the undo toast). Uploading (button or drag and drop) first opens a dialog: `ให้ดาวน์โหลดผ่านแชทได้` is ticked by default, so new files can be found by file requests; untick it for internal-only documents. The open folder's rename and delete are in a `⋯` menu next to the breadcrumb (same menu as on the folder row). Rows are at least 52 px high. Drag and drop move, double-click rename and the automatic reindex 2.5 s after a change are unchanged.
 - `config.py`: `CHAT_MODEL` (override with `RISA_CHAT_MODEL`), `SUMMARY_CHARS`.
 - `evals/run_eval.py` + `evals/questions.json`: 24 real CMU-based cases. Run with `python -m evals.run_eval` (about 50 API calls).
 - `tests/`: 99 tests. `test_rag.py` uses a scripted `FakeLLM` and `FakeStore`, so no network is needed.
@@ -151,6 +152,7 @@ For "ลาพักร้อนกี่วัน" the model calls `search_docu
 - "All receipts" sometimes returns only some of them.
 - `state.lock` is held for the whole tool loop, so concurrent staff queue longer.
 - Image-only (scanned) PDFs are not indexed because there is no OCR.
+- Spreadsheets: formulas show their last saved value (nothing if the file was never opened in Excel), charts and images are ignored, and rows past 3000 per sheet are cut. Slide images and diagrams are ignored.
 - Summaries of near-identical receipt forms read alike.
 - Only two topic folders exist. The topic filter is lightly tested with real data.
 - No log of real staff requests exists yet. The eval set is written by hand.

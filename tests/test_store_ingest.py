@@ -198,3 +198,21 @@ def test_summary_survives_moving_a_file_in_and_out_of_shareable(tmp_path):
     build_index(content, store, summarize)
     assert len(calls) == 1 and list(store.summaries().values()) == ["แบบฟอร์มลา"]
     assert store.cached_summary("nope") == ""
+
+
+def test_xlsx_and_pptx_are_indexed_like_other_documents(tmp_path):
+    import openpyxl
+    from pptx import Presentation
+    content = tmp_path / "content"
+    (content / "finance").mkdir(parents=True)
+    wb = openpyxl.Workbook()
+    wb.active.append(["รายการ", "จำนวนเงิน"])
+    wb.active.append(["ค่าเดินทาง", 1500])
+    wb.save(content / "finance" / "budget.xlsx")
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[5]).shapes.title.text = "แผนงาน"
+    prs.save(content / "finance" / "plan.pptx")
+    store = Store(tmp_path / "index", embed_fn=fake_embed)
+    result = build_index(content, store)
+    assert result["indexed"] == 2 and result["skipped"] == []
+    assert {store.doc_path(i) for i in store.signatures()} == {"finance/budget.xlsx", "finance/plan.pptx"}

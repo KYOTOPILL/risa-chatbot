@@ -17,7 +17,7 @@ Put **only documents every staff member may see** in `content/` (path set by `CO
 
 - Category = first-level subfolder name (`policy/`, `forms/`, `projects/`). Top-level files are `general`.
 - A file is downloadable on request only if a folder in its path is named `shareable` (for example `forms/shareable/expense-claim.pdf`). Everything else is answer-only.
-- Supported: PDF, DOCX, TXT, Markdown. Others are skipped with a warning. Scanned (image-only) PDFs are skipped: there is no OCR.
+- Supported: PDF, DOCX, XLSX, PPTX, TXT, Markdown. Others (including old .xls and .ppt) are skipped with a warning. Scanned (image-only) PDFs are skipped: there is no OCR.
 - `python scripts/make_mock_content.py` regenerates the mock documents.
 
 ## Run

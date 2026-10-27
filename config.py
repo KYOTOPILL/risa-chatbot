@@ -22,4 +22,4 @@ MAX_DISTANCE = 0.6  # cosine distance; tune with evals
 THAI_MIN_RATIO = 0.5  # ponytail: char-ratio heuristic lets a half-Thai reply through; use a language detector if it matters
 
 HR_CONTACT = "ฝ่ายทรัพยากรบุคคล (HR) อีเมล hr@example.com"  # placeholder
-SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md"}
+SUPPORTED_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}

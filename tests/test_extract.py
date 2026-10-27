@@ -21,7 +21,7 @@ def test_txt_and_md_utf8(mock_content):
 
 
 def test_unsupported_ext_raises(tmp_path):
-    p = tmp_path / "a.xlsx"
+    p = tmp_path / "a.xls"
     p.write_bytes(b"x")
     with pytest.raises(ValueError):
         extract_text(p)
@@ -53,3 +53,41 @@ def test_split_sara_am_is_recomposed():
     from extract import clean_thai
 
     assert clean_thai("ส\u0e4d\u0e32คัญ ต\u0e4d\u0e32บล") == "สำคัญ ตำบล"
+
+
+def test_xlsx_rows_keep_their_column_names_and_empty_rows_are_skipped(tmp_path):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "งบประมาณ"
+    ws.append(["รายการ", "จำนวนเงิน"])
+    ws.append([])
+    ws.append(["ค่าเดินทาง", 1500])
+    ws.append(["ค่าหนังสือ", None])
+    wb.create_sheet("Notes").append(["Item", "Owner"])
+    wb["Notes"].append(["Laptop", "Somchai"])
+    p = tmp_path / "budget.xlsx"
+    wb.save(p)
+    rows = extract_text(p).split("\n\n")
+    assert rows == ["[งบประมาณ] รายการ | จำนวนเงิน", "[งบประมาณ] รายการ: ค่าเดินทาง | จำนวนเงิน: 1500",
+                    "[งบประมาณ] รายการ: ค่าหนังสือ", "[Notes] Item | Owner", "[Notes] Item: Laptop | Owner: Somchai"]
+
+
+def test_pptx_text_tables_groups_and_notes_per_slide(tmp_path):
+    from pptx import Presentation
+    from pptx.util import Inches
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[5])
+    s1.shapes.title.text = "แผนงานปี 2569"
+    table = s1.shapes.add_table(2, 2, Inches(1), Inches(2), Inches(4), Inches(1)).table
+    for (r, c), v in {(0, 0): "ไตรมาส", (0, 1): "เป้าหมาย", (1, 0): "Q1", (1, 1): "เปิดตัว"}.items():
+        table.cell(r, c).text = v
+    s1.notes_slide.notes_text_frame.text = "พูดช้าๆ"
+    group = s1.shapes.add_group_shape()
+    group.shapes.add_textbox(0, 0, Inches(1), Inches(1)).text_frame.text = "ข้อความในกลุ่ม"
+    prs.slides.add_slide(prs.slide_layouts[6])  # empty slide: no paragraph
+    p = tmp_path / "plan.pptx"
+    prs.save(p)
+    text = extract_text(p)
+    assert text.startswith("Slide 1\nแผนงานปี 2569") and "ไตรมาส | เป้าหมาย" in text and "Q1 | เปิดตัว" in text
+    assert "ข้อความในกลุ่ม" in text and "Notes: พูดช้าๆ" in text and "Slide 2" not in text

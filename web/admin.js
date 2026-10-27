@@ -82,7 +82,7 @@ function render() {
   closeMenu();
   const crumbs = $("crumbs");
   crumbs.replaceChildren(crumb(ROOT_LABEL, ""));
-  if (cwd) crumbs.append(el("span", { className: "muted", textContent: "›" }), el("strong", { textContent: cwd }), folderOps(cwd));
+  if (cwd) crumbs.append(el("span", { className: "muted", textContent: "›" }), el("strong", { textContent: cwd }), folderMenu(cwd));
   const body = $("rows"), here = visible().sort((a, b) => a.name.localeCompare(b.name));
   body.replaceChildren();
   if (!cwd) folders.forEach((d) => body.append(folderRow(d)));
@@ -128,6 +128,23 @@ function menu(items) {
   return wrap;
 }
 
+// small "i" next to a file name: click to read the summary the model wrote; closes like the row menu
+function infoDot(summary) {
+  const wrap = el("span", { className: "infowrap" });
+  const b = el("button", { className: "info", type: "button", textContent: "i", ariaLabel: "ดูคำอธิบายไฟล์", ariaExpanded: "false" });
+  b.onclick = (e) => {
+    e.stopPropagation();
+    const was = openMenu?.parentNode === wrap;
+    closeMenu();
+    if (was) return;
+    const tip = el("div", { className: "tip" }, el("small", { textContent: "คำอธิบายโดย AI" }), el("p", { textContent: summary }));
+    tip.onclick = (ev) => ev.stopPropagation();  // lets the text be selected without closing
+    wrap.append(tip); openMenu = tip; b.setAttribute("aria-expanded", "true");
+  };
+  wrap.append(b);
+  return wrap;
+}
+
 function folderRow(d) {
   const inside = files.filter((f) => f.folder === d), who = cell("who"), nm = cell("nm");
   who.innerHTML = FOLDER;
@@ -136,7 +153,7 @@ function folderRow(d) {
   const last = inside.map((f) => f.mtime).sort().at(-1) || "";
   const r = el("div", { className: "frow folder", onclick: () => open(d) });
   r.append(cell(), who, cell("sw"), cell("sz", kb(inside.reduce((n, f) => n + f.size, 0))), cell("dt", last),
-    menu([["เปลี่ยนชื่อ", () => renameFolder(d)], "-", ["ลบโฟลเดอร์", () => removeFolder(d), "danger"]]));
+    folderMenu(d));
   dropTarget(r, d);
   return r;
 }
@@ -150,9 +167,9 @@ function fileRow(f) {
   const share = el("input", { type: "checkbox", className: "switch", checked: f.downloadable, ariaLabel: "ให้ดาวน์โหลดผ่านแชท " + f.name,
     title: f.downloadable ? "ดาวน์โหลดผ่านแชทได้ (คลิกเพื่อปิด)" : "ยังไม่เปิดให้ดาวน์โหลดผ่านแชท (คลิกเพื่อเปิด)",
     onchange: () => setShare([f.path], share.checked) });
-  const nm = cell("nm"), who = cell("who");
-  nm.append(title);
-  if (f.summary) nm.append(el("span", { textContent: f.summary }));
+  const nm = cell("nm"), who = cell("who"), line = el("div", { className: "tt" }, title);
+  if (f.summary) line.append(infoDot(f.summary));
+  nm.append(line);
   who.append(fileIcon(f.name), nm);
   r.append(el("div", {}, cb), who, el("div", { className: "sw" }, share), cell("sz", kb(f.size)), cell("dt", f.mtime),
     menu([["เปลี่ยนชื่อ", () => rename(f, title)],
@@ -183,12 +200,7 @@ function rename(f, target) {
   input.onblur = () => finish(true);
 }
 
-function folderOps(d) {
-  const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
-  return el("span", { className: "fops" },
-    el("button", { className: "link", type: "button", textContent: "เปลี่ยนชื่อ", onclick: stop(() => renameFolder(d)) }),
-    el("button", { className: "del", type: "button", textContent: "ลบ", onclick: stop(() => removeFolder(d)) }));
-}
+const folderMenu = (d) => menu([["เปลี่ยนชื่อ", () => renameFolder(d)], "-", ["ลบโฟลเดอร์", () => removeFolder(d), "danger"]]);
 
 function renameFolder(d) {
   const to = prompt("เปลี่ยนชื่อโฟลเดอร์", d);

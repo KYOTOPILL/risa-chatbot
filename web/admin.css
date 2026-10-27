@@ -11,8 +11,6 @@ a.ghost { text-decoration: none; }
 .del { color: var(--err); }
 .crumb:hover, .link:hover, .del:hover { text-decoration: underline; }
 .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.fops { margin-left: 14px; font-size: .9rem; font-weight: 400; }
-.fops .link { margin-right: 12px; }
 .ghost.danger { color: var(--err); }
 .drive.over { outline: 2px dashed var(--accent); outline-offset: -8px; }
 .crumb.over, div.frow.over { background: color-mix(in srgb, var(--accent) 16%, transparent); }
@@ -45,18 +43,20 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 16px 
 .bulkin .count { margin-right: auto; font-weight: 600; }
 
 .flist { margin-top: 14px; }
+.frow:not(.head) { min-height: 52px; }  /* folder rows and one-line file rows no longer differ in height */
+html { scrollbar-gutter: stable; }  /* a long folder adds a scrollbar: keep the page width the same either way */
 .frow { display: grid; grid-template-columns: 28px minmax(0, 1fr) 96px 90px 130px 40px; gap: 12px; align-items: center; padding: 10px 8px; border-bottom: 1px solid var(--line); border-radius: 10px; }
 .frow.head { color: var(--muted); font-size: .8rem; font-weight: 600; padding-top: 4px; padding-bottom: 6px; }
 .frow.folder { cursor: pointer; }
 .frow.folder:hover, .frow.file:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .frow.sel { background: color-mix(in srgb, var(--accent) 11%, transparent); }
 .frow .who { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.frow .ftype { margin: 0; flex: none; }
+.frow .ftype { margin: 0; flex: none; width: 36px; display: flex; justify-content: center; }  /* same box as .fol so names start at the same x in folders and files */
 .frow .ftype svg { height: 32px; }
 .frow .fol { flex: none; width: 36px; height: 32px; color: var(--accent); }
 .frow .nm { min-width: 0; }
 .nm b { display: block; font-weight: 600; overflow-wrap: anywhere; line-height: 1.35; }
-.nm span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: .82rem; line-height: 1.4; }
+.nm > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: .82rem; line-height: 1.4; }
 .frow .sz, .frow .dt { color: var(--muted); font-size: .88rem; white-space: nowrap; }
 
 .ops { position: relative; justify-self: end; }
@@ -80,13 +80,25 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 16px 
 @keyframes shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .frow.sk span { animation: none; } }
 
-.frow .sw { justify-self: start; }
+.frow .sw { justify-self: start; display: flex; align-items: center; }
 .frow.head .sw { white-space: nowrap; font-size: .75rem; }
 input[type=checkbox].switch { appearance: none; position: relative; width: 40px; height: 24px;  /* beats the generic checkbox size above */ border-radius: 999px; background: var(--line); cursor: pointer; transition: background .2s; margin: 0; flex: none; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0004; transition: translate .2s; }
-.switch:checked { background: var(--accent); }
+input[type=checkbox].switch:checked { background: var(--accent); }  /* same specificity as the base rule, or the green never shows */
 .switch:checked::after { translate: 16px 0; }
 .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
 dialog .check { flex-direction: row; align-items: center; gap: 10px; margin: 14px 0 6px; font-weight: 600; }
 dialog p { margin: 0; }
+
+.tt { min-width: 0; }  /* name and dot flow as text, so the dot sits right after the last word even when the name wraps */
+.tt b { display: inline; }
+.infowrap { margin-left: 8px; display: inline-block; vertical-align: .1em; position: relative; }
+.info { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--accent); background: none; color: var(--accent); font: italic 700 .7rem/1 Georgia, serif; cursor: pointer; padding: 0; display: grid; place-items: center; }
+.info:hover, .info[aria-expanded="true"] { background: var(--accent); color: var(--accent-ink); }
+.info::after { content: ""; position: absolute; inset: -8px; }  /* bigger tap target, same look */
+.tip { position: absolute; left: -4px; top: 30px; z-index: 6; width: min(380px, 78vw); padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px #0004; font-weight: 400; cursor: text; }
+.tip small { color: var(--muted); font-size: .75rem; }
+.tip p { margin: 4px 0 0; font-size: .9rem; line-height: 1.55; white-space: normal; }
+.crumbs .ops { align-self: center; }
+.crumbs .menu { left: 0; right: auto; }  /* opens under the dots, not off to the left */
