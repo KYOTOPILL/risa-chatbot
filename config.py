@@ -21,6 +21,7 @@ CHUNK_OVERLAP = 100
 SUMMARY_CHARS = 6000  # how much of a file the summary call reads
 TOP_K = 4
 MAX_DISTANCE = 0.6  # cosine distance; tune with evals
+MAX_INFLIGHT = int(os.environ.get("RISA_MAX_INFLIGHT", "2"))  # chat questions one IP may have being answered at once; 0 = off
 THAI_MIN_RATIO = 0.5  # ponytail: char-ratio heuristic lets a half-Thai reply through; use a language detector if it matters
 
 HR_CONTACT = "ฝ่ายทรัพยากรบุคคล (HR) อีเมล hr@example.com"  # placeholder

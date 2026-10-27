@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
@@ -21,6 +21,7 @@ log.setLevel(logging.INFO)
 
 WEB = ROOT / "web"
 ERROR_TEXT = "ขออภัย ระบบขัดข้อง กรุณาลองใหม่อีกครั้งหรือติดต่อผู้ดูแลระบบ"
+BUSY_TEXT = "กำลังตอบคำถามก่อนหน้าอยู่ กรุณารอสักครู่แล้วลองใหม่อีกครั้ง"
 Text = Annotated[str, StringConstraints(max_length=4000)]
 
 
@@ -48,13 +49,16 @@ app.include_router(admin.router)
 
 
 @app.post("/api/chat")
-def chat(body: ChatIn):
+def chat(body: ChatIn, request: Request):
     history = [rag.Turn(t.role, t.content) for t in body.history]
     key = " ".join(body.message.split()).casefold() if not history else None
     try:
         reply = state.cache.get(key)
         if reply is None:
-            reply = rag.answer(history, body.message, state.get_store())
+            with state.slot(request.client.host if request.client else "") as ok:
+                if not ok:  # this IP already has its allowed questions being answered
+                    return JSONResponse({"text": BUSY_TEXT, "files": []}, status_code=429)
+                reply = rag.answer(history, body.message, state.get_store())
             if key and len(state.cache) < state.CACHE_MAX:  # full: stop adding, a reindex clears it
                 state.cache[key] = reply
     except Exception:

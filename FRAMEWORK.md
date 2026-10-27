@@ -147,6 +147,7 @@ For "ลาพักร้อนกี่วัน" the model calls `search_docu
 - Eval runs are noisy. One run shows plus or minus a point or two.
 - Typo request "ขอดูเอหสารทุน" is ambiguous now that two topics exist.
 - "All receipts" sometimes returns only some of them.
+- Spam guard: one IP may have `RISA_MAX_INFLIGHT` questions being answered at once (default 2, 0 = off); more get 429 and a Thai 'still answering' message. There is no limit on how many questions it asks over time, and cached answers are free. The page sends one question at a time, so only a script flooding the API hits this, and it caps one flooder at about 2 questions per answer time (a few seconds). Behind a reverse proxy every visitor shares the proxy's IP, so run uvicorn with `--proxy-headers --forwarded-allow-ips=<proxy ip>`, or two simultaneous users would block each other. Counts are per process.
 - Chat questions run in parallel (one thread each, up to 40 in uvicorn's pool); extra ones wait in that pool. A re-index no longer blocks chat. Chat runs as one process: the answer cache is per process, so do not start several workers without moving it out.
 - Image-only (scanned) PDFs are not indexed because there is no OCR.
 - Spreadsheets: formulas show their last saved value (nothing if the file was never opened in Excel), charts and images are ignored, and rows past 3000 per sheet are cut. Slide images and diagrams are ignored.
@@ -160,8 +161,7 @@ For "ลาพักร้อนกี่วัน" the model calls `search_docu
 ## 7. Next steps worth doing
 
 1. Commit the tool-based migration.
-2. Per-IP rate limit on `/api/chat` if the bot is exposed beyond staff.
-3. Collect real staff requests and add them to `evals/questions.json`.
-4. Re-check `FIND_MAX` and rerun the eval once more topics and files exist.
-5. Add OCR if scanned PDFs matter.
-6. More cost cuts, each checked against the eval: return `FILE_READY` straight after `send_files` (saves one call), shorter history, `TOP_K` 4 to 3, shorter file summaries, Batch API for the first bulk index.
+2. Collect real staff requests and add them to `evals/questions.json`.
+3. Re-check `FIND_MAX` and rerun the eval once more topics and files exist.
+4. Add OCR if scanned PDFs matter.
+5. More cost cuts, each checked against the eval: return `FILE_READY` straight after `send_files` (saves one call), shorter history, `TOP_K` 4 to 3, shorter file summaries, Batch API for the first bulk index.

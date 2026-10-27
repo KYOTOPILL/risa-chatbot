@@ -57,6 +57,26 @@ def test_chat_questions_run_in_parallel(client):
     assert peak > 1
 
 
+def test_one_ip_cannot_flood_but_can_keep_asking(client, monkeypatch):
+    import threading
+    import time
+
+    monkeypatch.setattr("config.MAX_INFLIGHT", 2)
+    codes = []
+
+    def slow(history, message, store):
+        time.sleep(0.3)
+        return rag.Reply("ok")
+
+    with patch("rag.answer", slow):
+        ts = [threading.Thread(target=lambda i=i: codes.append(post(client, f"q{i}").status_code)) for i in range(5)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        assert sorted(codes) == [200, 200, 429, 429, 429]  # only 2 at once from one IP
+        assert [post(client, f"later{i}").status_code for i in range(5)] == [200] * 5  # one after another is never limited
+    assert state._busy == {}
+
+
 def test_chat_returns_text_and_file_ids(client):
     with patch("rag.answer", return_value=rag.Reply("ลาพักร้อน 10 วัน", ["abc"], ["policy/leave.pdf"])):
         r = post(client)
