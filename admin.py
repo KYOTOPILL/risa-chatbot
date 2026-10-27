@@ -4,6 +4,7 @@ import re
 import secrets
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -26,10 +27,14 @@ basic = HTTPBasic(auto_error=False)
 
 
 def require_admin(request: Request, creds: HTTPBasicCredentials | None = Depends(basic)) -> None:
+    host = request.headers.get("host", "")
+    origin = request.headers.get("origin")  # browsers send it on cross-site form posts, which carry cached Basic creds
+    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and urlsplit(origin).netloc != host:
+        raise HTTPException(403, "cross-site request blocked")
     password = os.environ.get("ADMIN_PASSWORD")
     if not password:  # no password set: loopback only, as before
-        if not request.client or request.client.host not in LOCAL_HOSTS:
-            raise HTTPException(403, "admin is only available on the server machine")
+        if not request.client or request.client.host not in LOCAL_HOSTS or urlsplit("//" + host).hostname not in LOCAL_HOSTS:
+            raise HTTPException(403, "admin is only available on the server machine")  # Host check stops DNS rebinding
         return
     # ponytail: one shared login, no lockout or rate limit; add both before exposing beyond a trusted LAN
     ok = creds is not None and all(

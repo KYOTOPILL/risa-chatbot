@@ -231,3 +231,17 @@ def test_delete_folder_removes_contents_only_that_folder(env):
     for bad in ("", "..", "a/b", "nope"):
         assert c.post("/api/admin/delete-folder", json={"folder": bad}).status_code in (400, 404)
     assert content.exists() and (content / "forms" / "a.txt").exists()
+
+
+def test_cross_site_post_and_rebinding_are_blocked(monkeypatch):
+    server.app.dependency_overrides.clear()
+    monkeypatch.setenv("ADMIN_PASSWORD", "s3cret")
+    c = TestClient(server.app)
+    r = c.post("/api/admin/reindex", auth=("admin", "s3cret"), headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403 and "cross-site" in r.text
+    r = c.get("/api/admin/folders", auth=("admin", "s3cret"), headers={"Origin": "https://evil.example"})
+    assert r.status_code == 200  # reads are not Origin-checked; browsers block cross-site reads
+    monkeypatch.delenv("ADMIN_PASSWORD")
+    local = TestClient(server.app, client=("127.0.0.1", 5000), base_url="http://localhost")
+    assert local.get("/api/admin/folders").status_code == 200
+    assert local.get("/api/admin/folders", headers={"Host": "evil.example"}).status_code == 403

@@ -1,8 +1,8 @@
 # Office RAG Chatbot
+Design: `docs/superpowers/specs/`. Plan: `docs/superpowers/plans/`.
 
 Local Thai chatbot (FastAPI backend + plain HTML/CSS/JS page in `web/`) over office documents. Answers in Thai from the indexed documents only, says "not found" plus the HR contact otherwise, and hands over a file only when asked and only if it is marked downloadable.
 
-Design: `docs/superpowers/specs/`. Plan: `docs/superpowers/plans/`.
 
 ## Setup
 1. Install [Ollama](https://ollama.com), then:
@@ -28,7 +28,7 @@ Put **only documents every staff member may see** in `content/` (path set by `CO
 Server later: same code, add `--host 0.0.0.0` to expose on the office LAN. Restart the server after changing `config.py`. Change models in `config.py` (`CHAT_MODEL`, `EMBED_MODEL`) and the HR contact in `HR_CONTACT` (placeholder now).
 
 ## Manage files (admin page)
-Open http://localhost:8000/admin on the server machine. It works like a drive: folders (= categories, one level) with a breadcrumb; drag files onto the list or a folder to upload; tick rows to move (drag onto a folder, or "ย้ายไป…") or bulk-delete; double-click a name to rename; the per-row switch makes a file downloadable through chat (it moves the file into `shareable/`). Every change saves at once and the index re-builds by itself a few seconds after the last change (chat waits while it runs); "อัปเดตดัชนีใหม่" forces it. Emptied folders disappear. Same-name uploads replace the old file. Without `ADMIN_PASSWORD` the page works only from the server machine itself (loopback). To expose it, start the server with `ADMIN_PASSWORD=<long random string>`; the browser then asks for a login (user `admin`). Set it on any deployed server: behind a reverse proxy on the same machine every visitor looks like loopback, and a set password is the only thing that stops them. Serve over HTTPS, since Basic auth sends the password in every request.
+Open http://localhost:8000/admin on the server machine. It works like a drive: folders (= categories, one level) with a breadcrumb; drag files onto the list or a folder to upload; tick rows to move (drag onto a folder, or "ย้ายไป…") or bulk-delete; double-click a name to rename; the per-row switch makes a file downloadable through chat (it moves the file into `shareable/`). Every change saves at once and the index re-builds by itself a few seconds after the last change (chat waits while it runs); "อัปเดตดัชนีใหม่" forces it. Emptied folders disappear. Same-name uploads replace the old file. Without `ADMIN_PASSWORD` the page works only from the server machine itself (loopback). To expose it, start the server with `ADMIN_PASSWORD=<long random string>`; the browser then asks for a login (user `admin`). Set it on any deployed server: behind a reverse proxy on the same machine every visitor looks like loopback, and a set password is the only thing that stops them. Serve over HTTPS, since Basic auth sends the password in every request. Admin writes with a foreign `Origin` header are rejected (CSRF), and without a password the `Host` header must also be loopback (DNS rebinding); a proxy that rewrites `Host` must keep the browser's `Origin` host the same.
 
 ## Check correctness
 ```
