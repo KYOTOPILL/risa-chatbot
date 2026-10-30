@@ -10,7 +10,7 @@ Stack: FastAPI + plain HTML/JS, Chroma vector store, local `bge-m3` embeddings (
         |
         v
   ingest.build_index  --->  Store (Chroma)
-   - extract text (+xlsx,pptx) - "docs"  collection: text chunks     (for answering questions)
+   - extract text (+docx tables,xlsx,pptx) - "docs"  collection: text chunks     (for answering questions)
    - chunk 800/100            - "names" collection: one entry per   (for finding files)
    - embed (bge-m3)             downloadable file = name + Thai summary
    - LLM summary (new files)
@@ -94,7 +94,7 @@ Guards in code (the model cannot bypass them):
 - `build_index(content_dir, store, summarize)` walks `content/`, skips files whose signature is unchanged, and returns `{"indexed","changed","skipped"}`.
 - `summarize(text)` asks the model for a Thai summary once for every new or changed file, downloadable or not, and remembers it by file signature, so a description never depends on the downloadable switch. A file whose summary is missing (for example indexed before this rule, or a failed call) is indexed again on the next reindex. Only downloadable files' summaries go into the name index used by file requests. A failure is logged and the file is still indexed.
 - `DocMeta` gained `summary` and `sig`.
-- `extract.py`: `extract_text` reads PDF (pymupdf), DOCX, XLSX (`_xlsx`), PPTX (`_pptx`), TXT and MD. `_xlsx` writes one paragraph per row as `[Sheet] Header: value | Header: value` (first non-empty row is the header, empty rows and cells are skipped, at most `MAX_SHEET_ROWS=3000` rows per sheet, cached formula values), so chunking never cuts a row and each value keeps its column name. `_pptx` writes one paragraph per slide: text boxes, tables (cells joined by ` | `), grouped shapes and speaker notes; slides with no text are skipped. Old `.xls` and `.ppt` are not supported (`SUPPORTED_EXTS` in `config.py`, also the upload picker in `admin.html`). New dependencies: `openpyxl`, `python-pptx`.
+- `extract.py`: `extract_text` reads PDF (pymupdf), DOCX (`_docx`: paragraphs and tables in document order, a table row is one line of cells joined by ` | `, merged cells counted once, nested tables not read), XLSX (`_xlsx`), PPTX (`_pptx`), TXT and MD. `_xlsx` writes one paragraph per row as `[Sheet] Header: value | Header: value` (first non-empty row is the header, empty rows and cells are skipped, at most `MAX_SHEET_ROWS=3000` rows per sheet, cached formula values), so chunking never cuts a row and each value keeps its column name. `_pptx` writes one paragraph per slide: text boxes, tables (cells joined by ` | `), grouped shapes and speaker notes; slides with no text are skipped. Old `.xls` and `.ppt` are not supported (`SUPPORTED_EXTS` in `config.py`, also the upload picker in `admin.html`). New dependencies: `openpyxl`, `python-pptx`.
 
 ### Other files
 

@@ -91,3 +91,16 @@ def test_pptx_text_tables_groups_and_notes_per_slide(tmp_path):
     text = extract_text(p)
     assert text.startswith("Slide 1\nแผนงานปี 2569") and "ไตรมาส | เป้าหมาย" in text and "Q1 | เปิดตัว" in text
     assert "ข้อความในกลุ่ม" in text and "Notes: พูดช้าๆ" in text and "Slide 2" not in text
+
+
+def test_docx_tables_are_read_in_order_with_merged_cells_once(tmp_path):
+    from docx import Document
+    d = Document()
+    d.add_paragraph("before")
+    t = d.add_table(rows=2, cols=3)
+    t.cell(0, 0).text, t.cell(0, 1).text, t.cell(0, 2).text = "งบ", "จำนวน", "หมายเหตุ"
+    t.cell(1, 0).merge(t.cell(1, 1)).text = "ค่าเดินทาง"
+    t.cell(1, 2).text = "15,000"
+    d.add_paragraph("after")
+    d.save(tmp_path / "t.docx")
+    assert extract_text(tmp_path / "t.docx") == "before\nงบ | จำนวน | หมายเหตุ\nค่าเดินทาง | 15,000\nafter"

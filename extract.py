@@ -4,6 +4,7 @@ from pathlib import Path
 import openpyxl
 import pymupdf
 from docx import Document
+from docx.text.paragraph import Paragraph
 from pptx import Presentation
 
 from config import SUPPORTED_EXTS
@@ -15,7 +16,21 @@ def _pdf(path: Path) -> str:
 
 
 def _docx(path: Path) -> str:
-    return "\n".join(p.text for p in Document(path).paragraphs)
+    """Paragraphs and tables in document order; a table row becomes one line of cells joined by " | "."""
+    out = []
+    for block in Document(path).iter_inner_content():
+        if isinstance(block, Paragraph):
+            out.append(block.text)
+            continue
+        for row in block.rows:
+            cells = []
+            for c in row.cells:  # a merged cell repeats in row.cells
+                t = c.text.strip().replace("\n", " ")
+                if t and t not in cells:
+                    cells.append(t)
+            if cells:
+                out.append(" | ".join(cells))
+    return "\n".join(out)
 
 
 MAX_SHEET_ROWS = 3000  # ponytail: a huge sheet would become hundreds of chunks; raise if real sheets are longer
