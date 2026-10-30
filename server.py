@@ -1,9 +1,12 @@
+import json
 import logging
+import queue
+import threading
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 from typing_extensions import Annotated
@@ -64,7 +67,11 @@ def chat(body: ChatIn, request: Request):
     except Exception:
         log.exception("answer failed")
         return JSONResponse({"text": ERROR_TEXT, "files": []}, status_code=503)
-    log.info("q=%r sources=%s", body.message, reply.sources)
+    return _payload(body.message, reply)
+
+
+def _payload(message: str, reply: rag.Reply) -> dict:
+    log.info("q=%r sources=%s", message, reply.sources)
     store = state.get_store()
     summaries = store.summaries(reply.file_doc_ids)
     files = []
@@ -75,6 +82,55 @@ def chat(body: ChatIn, request: Request):
             files.append({"id": i, "name": Path(rel).name, "summary": summaries.get(i, ""),
                           "size": path.stat().st_size if path.is_file() else None})
     return {"text": reply.text, "files": files}
+
+
+@app.post("/api/chat/stream")
+def chat_stream(body: ChatIn, request: Request):
+    """Same answer as /api/chat, sent as JSON lines: {"status": text} while tools run, {"delta": text} while the answer is written ({"delta": null} = discard
+    the text so far), then {"done": true, "text", "files"} with the final text, or {"error": text}."""
+    history = [rag.Turn(t.role, t.content) for t in body.history]
+    key = " ".join(body.message.split()).casefold() if not history else None
+    ip = request.client.host if request.client else ""
+    line = lambda o: json.dumps(o, ensure_ascii=False) + "\n"
+
+    def events():
+        reply = state.cache.get(key)
+        if reply is None:
+            q: queue.Queue = queue.Queue()
+
+            def work():
+                try:
+                    with state.slot(ip) as ok:
+                        if not ok:
+                            q.put(("error", BUSY_TEXT))
+                            return
+                        q.put(("reply", rag.answer(history, body.message, state.get_store(), llm=rag.chat_tools_stream,
+                                                   on_delta=lambda d: q.put(("delta", d)),
+                                                   on_status=lambda t: q.put(("status", t)))))
+                except Exception:
+                    log.exception("answer failed")
+                    q.put(("error", ERROR_TEXT))
+
+            threading.Thread(target=work, daemon=True).start()  # the answer blocks; this generator relays what it reports
+            while True:
+                kind, val = q.get()
+                if kind in ("delta", "status"):
+                    yield line({kind: val})
+                elif kind == "error":
+                    yield line({"error": val})
+                    return
+                else:
+                    reply = val
+                    break
+            if key and len(state.cache) < state.CACHE_MAX:
+                state.cache[key] = reply
+        try:
+            yield line({"done": True, **_payload(body.message, reply)})
+        except Exception:
+            log.exception("answer failed")
+            yield line({"error": ERROR_TEXT})
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={"X-Accel-Buffering": "no"})
 
 
 @app.get("/download/{doc_id}")

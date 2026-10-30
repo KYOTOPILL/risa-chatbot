@@ -144,11 +144,12 @@ class Store:
         res = self._names.get(ids=ids)
         return {i: display_summary(d.partition("\n")[2].strip()) for i, d in zip(res["ids"], res["documents"])}
 
-    def topics(self) -> dict[str, int]:
-        """Topic folder -> number of downloadable files in it."""
-        out: dict[str, int] = {}
-        for m in self._names.get(include=["metadatas"])["metadatas"]:
-            out[m["category"]] = out.get(m["category"], 0) + 1
+    def topic_files(self) -> dict[str, list[tuple[str, str]]]:
+        """Topic folder -> (file name, one-paragraph Thai summary) for each downloadable file in it."""
+        res = self._names.get(include=["metadatas", "documents"])
+        out: dict[str, list[tuple[str, str]]] = {}
+        for m, d in zip(res["metadatas"], res["documents"]):
+            out.setdefault(m["category"], []).append((Path(m["rel_path"]).name, display_summary(d.partition("\n")[2].strip())))
         return out
 
     def categories(self) -> list[str]:

@@ -29,7 +29,7 @@ class FakeStore:
         self.finds.append((question, k, category))
         return [n for n in self.names if category in (None, n.category)][:k]
 
-    def topics(self):
+    def topic_files(self):
         return self._topics
 
     def categories(self):
@@ -150,10 +150,11 @@ def test_sent_file_with_not_found_text_still_says_file_ready():
     assert r.file_doc_ids == ["a"] and r.text == rag.FILE_READY
 
 
-def test_list_topics_reports_counts():
+def test_list_topics_gives_summaries_but_no_file_names():
     llm = FakeLLM(call("list_topics"), say("มีหมวดไหนบ้างค่ะ"))
-    r = answer([], "มีเอกสารอะไรบ้าง", FakeStore(topics={"forms": 2, "policy": 1}), llm=llm)
-    assert llm.tool_results()[0] == "forms (2 files)\npolicy (1 files)" and r.file_doc_ids == []
+    topics = {"forms": [("a.docx", "แบบฟอร์ม A"), ("b.docx", "แบบฟอร์ม B")], "policy": [("p.pdf", "นโยบาย")]}
+    r = answer([], "มีเอกสารอะไรบ้าง", FakeStore(topics=topics), llm=llm)
+    assert llm.tool_results()[0] == "forms (2 files)\n- แบบฟอร์ม A\n- แบบฟอร์ม B\n\npolicy (1 files)\n- นโยบาย" and r.file_doc_ids == []
 
 
 def test_english_reply_is_retried_then_falls_back():
@@ -222,3 +223,55 @@ def test_usage_is_summed_and_chat_tools_caps_output(monkeypatch):
     assert seen["json"]["max_completion_tokens"] == rag.MAX_ANSWER_TOKENS
     assert rag.usage["calls"] - before["calls"] == 1 and rag.usage["prompt"] - before["prompt"] == 100
     assert rag.usage["completion"] - before["completion"] == 7
+
+
+def test_hold_markers_hides_a_marker_but_passes_normal_text():
+    out = []
+    push = rag._hold_markers(out.append)
+    for d in ("NOT", "_FOUND"):
+        push(d)
+    assert out == []  # nothing shown for a marker
+    out.clear()
+    push = rag._hold_markers(out.append)
+    for d in ("NO", "T ", "ลา"):
+        push(d)
+    assert "".join(out) == "NOT ลา"
+
+
+def test_chat_tools_stream_joins_text_and_tool_call_fragments(monkeypatch):
+    import contextlib
+    import json as j
+    chunks = [
+        {"choices": [{"delta": {"content": "ลอง"}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "find_files", "arguments": "{\"qu"}}]}}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "ery\":\"x\"}"}}]}}]},
+        {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 2}},
+    ]
+    lines = [f"data: {j.dumps(c)}" for c in chunks] + ["data: [DONE]"]
+
+    @contextlib.contextmanager
+    def fake_stream(method, **kw):
+        class R:
+            def raise_for_status(self): pass
+            def iter_lines(self): return iter(lines)
+        yield R()
+
+    monkeypatch.setattr(rag.httpx, "stream", fake_stream)
+    seen = []
+    msg = rag.chat_tools_stream([], rag.TOOLS, "auto", seen.append)
+    assert seen == ["ลอง", None]  # text, then dropped because a tool call followed
+    assert msg["content"] == "" and msg["tool_calls"] == [
+        {"id": "c1", "type": "function", "function": {"name": "find_files", "arguments": '{"query":"x"}'}}]
+
+
+def test_answer_reports_status_for_each_tool_and_before_writing():
+    seen = []
+    calls = iter([
+        {"content": None, "tool_calls": [{"id": "1", "function": {"name": "search_documents", "arguments": '{"query":"ลา"}'}}]},
+        {"content": "ตอบ ลา 10 วัน", "tool_calls": None},
+    ])
+    class S:
+        def query(self, *a, **k): return []
+        def categories(self): return []
+    rag.answer([], "ลา", S(), llm=lambda m, t, c: next(calls), on_status=seen.append)
+    assert seen == ["กำลังค้นหาในเอกสาร “ลา”...", "กำลังเรียบเรียงคำตอบ..."]

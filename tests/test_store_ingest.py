@@ -156,10 +156,10 @@ def test_find_files_can_be_limited_to_a_topic_folder(tmp_path):
     assert store.find_files("expense", 5, "policy") == []
 
 
-def test_topics_counts_downloadable_files_per_folder(tmp_path):
+def test_topic_files_lists_downloadable_files_per_folder(tmp_path):
     content, store = make(tmp_path)
-    build_index(content, store)
-    assert store.topics() == {"forms": 1}
+    build_index(content, store, summarize=lambda t: "แบบฟอร์มเบิก")
+    assert store.topic_files() == {"forms": [("expense.txt", "แบบฟอร์มเบิก")]}
 
 
 def test_summaries_drop_the_inline_keyword_list(tmp_path):

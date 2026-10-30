@@ -20,6 +20,7 @@ Put **only documents every staff member may see** in `content/` (path set by `CO
 - `python scripts/make_mock_content.py` regenerates the mock documents.
 
 ## Run
+Easiest: `./run.sh`. It starts Ollama if it is off, pulls `bge-m3` if missing, refreshes the index, then starts the server (chat http://localhost:8000, admin http://localhost:8000/admin). Or by hand:
 ```
 .venv/bin/python ingest.py          # build or refresh the index (re-run after files change)
 .venv/bin/uvicorn server:app --port 8000   # chat page at http://localhost:8000

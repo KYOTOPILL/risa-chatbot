@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -174,3 +175,29 @@ def test_every_element_id_a_script_looks_up_exists_in_its_page(js, html):
     ids = set(re.findall(r'\$\("([\w-]+)"\)', (web / js).read_text(encoding="utf-8")))
     page = (web / html).read_text(encoding="utf-8")
     assert [i for i in ids if f'id="{i}"' not in page] == []  # a missing id throws at load and the page stays blank
+
+
+def stream(client, message="ลากี่วัน", history=None):
+    r = client.post("/api/chat/stream", json={"message": message, "history": history or []})
+    return r, [json.loads(l) for l in r.text.splitlines()]
+
+
+def test_stream_sends_deltas_then_the_final_text_and_files(client):
+    def fake(history, message, store, llm=None, on_delta=None, on_status=None):
+        on_status("กำลังค้นหา...")
+        on_delta("ลา"), on_delta("พักร้อน")
+        return rag.Reply("ลาพักร้อน 10 วัน", [], [])
+    with patch("rag.answer", fake):
+        r, events = stream(client)
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    assert events == [{"status": "กำลังค้นหา..."}, {"delta": "ลา"}, {"delta": "พักร้อน"}, {"done": True, "text": "ลาพักร้อน 10 วัน", "files": []}]
+
+
+def test_stream_cached_question_skips_the_model_and_errors_are_thai(client):
+    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+        stream(client)
+        _, events = stream(client)
+    assert ans.call_count == 1 and events == [{"done": True, "text": "ตอบ", "files": []}]
+    with patch("rag.answer", side_effect=RuntimeError("boom")):
+        _, events = stream(client, "คำถามใหม่")
+    assert events == [{"error": server.ERROR_TEXT}]

@@ -20,7 +20,7 @@ Stack: FastAPI + plain HTML/JS, Chroma vector store, local `bge-m3` embeddings (
    LLM + 4 tools  ->  Reply(text, file_doc_ids, sources)
         |
         v
-  server.py  /api/chat  ->  web/app.js shows text + file names as download links
+  server.py  /api/chat/stream  ->  web/app.js shows text as it is written + file names as download links
 ```
 
 Two ideas carry the whole design:
@@ -51,6 +51,7 @@ Two ideas carry the whole design:
 | `answer(history, message, store, llm)` | Runs the tool loop and returns a `Reply`. Everything else supports this. |
 | inner `run(name, args)` | Executes one tool call against the store and returns text for the model. |
 | `chat_tools(messages, tools, tool_choice)` | One OpenAI call with tool support. `chat()` is the plain version, still used for summaries. |
+| `chat_tools_stream(..., on_delta)` | Same call with `stream: true`; answer text goes to `on_delta` as it arrives, tool-call fragments are joined, token usage is still counted. `on_delta(None)` means the text so far was not the answer (a tool call followed). `answer(..., llm=chat_tools_stream, on_delta=...)` streams only the final round, and `_hold_markers` keeps `NOT_FOUND` / `OUT_OF_SCOPE` from showing before they are swapped for the Thai message. |
 | `AGENT_SYSTEM` | System prompt: tool descriptions, Thai-only, tool results are data, reply `NOT_FOUND` when nothing fits, `OUT_OF_SCOPE` when the question has nothing to do with the company (weather, recipes, coding). |
 | `TOOLS` | The four tool definitions below. |
 | `_dedupe`, `_context` | Drop overlapping chunks and format search results with their modified date. |
@@ -66,7 +67,7 @@ The four tools:
 | `search_documents(query, topic?)` | Questions about what documents say | Up to `TOP_K=4` chunks, fenced in `<context>`, hits over `MAX_DISTANCE=0.6` dropped |
 | `find_files(query, topic?)` | User asks for or asks about a file | Up to `FIND_K=8` candidates as `f1 \| name \| topic \| summary` |
 | `send_files(file_ids)` | After `find_files`, to attach files | Confirmation. Only ids from this turn's `find_files` are accepted |
-| `list_topics()` | Vague "what documents do you have" | Topic folders with file counts, so the bot asks which topic |
+| `list_topics()` | Vague "what documents do you have" | Each topic folder with its file count, file names and short Thai summaries (`Store.topic_files()`), so the bot can summarize what each topic holds and then ask which one |
 
 Guards in code (the model cannot bypass them):
 - Round 0 forces a tool call (`tool_choice="required"`). Loop is capped at `MAX_ROUNDS=4`.
@@ -83,7 +84,7 @@ Guards in code (the model cannot bypass them):
 | `Store.update(items, keep)` | Embed only changed docs, delete removed ones. |
 | `Store.signatures()` | Returns `size:mtime_ns` per file so unchanged files are skipped. |
 | `Store.find_files(question, k, category)` | Searches the `names` collection (name plus summary). |
-| `Store.topics()`, `categories()` | Topic folders and how many downloadable files each has. |
+| `Store.topic_files()`, `categories()` | Topic folders and how many downloadable files each has. |
 | `Store.doc_path()` | Maps an id to a path. The server uses it to show file names. |
 | `Store.cached_summary(sig)`, `remember_summary(sig, text)` | Summaries remembered by file signature (size + mtime) in `index/summaries.json`. Moving or renaming a file, or switching downloadable off and on, keeps the same content, so it keeps its summary and costs no new API call. `ingest.build_index` reads this before calling the LLM, and `/api/admin/files` falls back to it so a non-downloadable file still shows its description. |
 | `Store.summaries(ids=None)` | doc_id to Thai summary for downloadable files. Used by `/api/chat` (file cards) and `/api/admin/files`. |
@@ -98,10 +99,10 @@ Guards in code (the model cannot bypass them):
 
 ### Other files
 
-- `server.py`: `/api/chat` returns `{"text", "files": [{"id","name"}]}`. A question with no history is looked up in `state.cache` (key: lower-cased, whitespace-normalized message) before any OpenAI call.
+- `server.py`: `/api/chat/stream` is what the page uses: JSON lines `{"status": text}` while a tool runs, `{"delta": text}` while the answer is written (`{"delta": null}` = discard it), then `{"done": true, "text", "files"}` or `{"error": text}`. It runs `answer` in a thread and relays its deltas through a queue; cache, per-IP slot, and logging match `/api/chat`. The final `text` replaces what streamed, since marker and language fixes can change it. `/api/chat` is the same answer in one JSON response (tests, evals, load test) and returns `{"text", "files": [{"id","name"}]}`. A question with no history is looked up in `state.cache` (key: lower-cased, whitespace-normalized message) before any OpenAI call.
 - `state.py`: `cache` (up to `CACHE_MAX=500` replies, no expiry) is cleared by `admin.reindex`, so a changed index never serves old answers. Questions with history are never cached, and failed answers are never cached.
 - `web/icons.js`: `fileIcon(name)` returns an inline SVG icon (page with folded corner and a coloured label: PDF, DOC, XLS, PPT, TXT, or the upper-cased extension in grey) that `app.js` appends at the end of each file link. Edit `TYPES` and `COLORS` in `icons.js` to change labels or colours; size is the `.ftype svg` rule in `style.css`.
-- Chat screen (`web/app.js`, `style.css`): each reply is a row with a bot avatar (RiSA), the bubble and a time stamp shown on hover (not restored after a refresh). Each file is a card (`.fcard`): type icon, name (2 lines max), Thai summary (2 lines max), `TYPE · size`, download arrow. While waiting, the status text rotates through `WAITING` (it is not tied to the real tool step: that needs streaming). Old behaviour kept: renders each file as a link, and saves sent file names in history so "the other one" works.
+- Chat screen (`web/app.js`, `style.css`): each reply is a row with a bot avatar (RiSA), the bubble and a time stamp shown on hover (not restored after a refresh). Each file is a card (`.fcard`): type icon, name (2 lines max), Thai summary (2 lines max), `TYPE · size`, download arrow. While waiting, the bubble shows the real step from `{"status"}` lines (`rag.STATUS`: searching documents with the model's query, finding files, attaching files, then composing the answer), starting at `กำลังคิด...`, next to a spinning, pulsing four-point spark (`.spark`) with a shimmering text (`.shimmer`), both still under `prefers-reduced-motion`. The text comes from the code that runs each tool, so it costs no tokens. Old behaviour kept: renders each file as a link, and saves sent file names in history so "the other one" works.
 - `admin.py`: reindex calls `build_index(..., summarize)`. Debounce lives here: every successful upload, replace, delete, move, folder rename or folder delete (the `CHANGES` dependency) restarts a `REINDEX_DELAY` (2.5 s) timer that runs `reindex()`, so the index catches up even when the browser tab is closed. `GET /api/admin/index-status` returns `{state: ok|stale|busy|error, indexed, skipped, error}`; the admin page polls it every 1.5 s while stale or busy. A failed run shows `error` and the next change retries. `/api/admin/files` rows now include `summary`.
 - File manager (`web/admin.html`, `admin.js`, `admin.css`): breadcrumb, an index status strip (green = chat has the latest files, amber = changes waiting for the automatic reindex, spinner = updating, red = error; no button, it updates by itself; the strip shows the server's status), a selection bar that slides in only when files are ticked, folder rows (count, total size, last edit), file rows (type icon, name with a small `i` button that opens the AI-written Thai summary in a popover, and a `ดาวน์โหลดในแชท` column with an on/off switch that moves the file in or out of the `shareable` folder; the selection bar has `เปิดให้ดาวน์โหลด` / `ปิดการดาวน์โหลด` for many files at once) and a `⋯` menu per row (rename, move, replace, delete in red, with the undo toast). Uploading (button or drag and drop) first opens a dialog: `ให้ดาวน์โหลดผ่านแชทได้` is ticked by default, so new files can be found by file requests; untick it for internal-only documents. The open folder's rename and delete are in a `⋯` menu next to the breadcrumb (same menu as on the folder row). Rows are at least 52 px high. Drag and drop move, double-click rename and the automatic reindex 2.5 s after a change (now timed by the server) are unchanged.
 - `config.py`: `CHAT_MODEL` (override with `RISA_CHAT_MODEL`), `SUMMARY_CHARS`.
