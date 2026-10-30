@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const SHARE = "shareable", ROOT_LABEL = "เอกสารทั้งหมด";
 let files = [], folders = [], cwd = "", selected = new Set(), dragging = [];
-let timer, busy = false, stale = false, note = null;  // note: { text, err } shown in the index strip
+let poll, idx = { state: "ok", skipped: [] }, note = null;  // idx: server index status; note: { text, err } of a failed admin action
 let pending = null;  // delete waiting out its undo window: { paths, timer }
 const CACHE = "risa-admin";
 const vt = (fn) => (document.startViewTransition ? document.startViewTransition(fn) : fn());
@@ -15,15 +15,22 @@ const visible = () => files.filter((f) => f.folder === cwd);
 
 function say(text, err = false) { note = { text, err }; renderIndex(); }
 
-// index strip: green = chat sees the latest files, amber = changes waiting, spinner = updating
+// index strip: green = chat sees the latest files, amber = changes waiting, spinner = updating. The server debounces and re-indexes; this only shows its status.
 function renderIndex() {
-  const box = $("index"), pill = el("span", { className: "pill" }), state = busy ? "busy" : stale ? "stale" : "ok";
-  const btn = el("button", { type: "button", disabled: busy, className: state === "ok" ? "ghost" : "primary", onclick: reindex,
-    textContent: busy ? "กำลังอัปเดต…" : stale ? "อัปเดตดัชนีตอนนี้" : "อัปเดตดัชนีใหม่" });
-  box.className = "index " + state + (note?.err ? " err" : "");
-  if (note) pill.textContent = note.text;
-  else pill.append(state === "ok" ? "ดัชนีล่าสุด" : "กำลังอัปเดต", el("small", { textContent: state === "ok" ? "แชทใช้ข้อมูลล่าสุดแล้ว" : "" }));
-  box.replaceChildren(pill, btn);
+  const box = $("index"), pill = el("span", { className: "pill" }), s = idx.state;
+  const text = note?.text || (s === "error" ? idx.error : s === "busy" ? "กำลังอัปเดตดัชนี… (แชทจะรอสักครู่)" : s === "stale" ? "มีการเปลี่ยนแปลง · แชทยังใช้ข้อมูลเดิมจนกว่าจะอัปเดตดัชนี"
+    : idx.indexed != null ? "ดัชนีล่าสุด · " + idx.indexed + " ไฟล์" + (idx.skipped.length ? " · ข้าม " + idx.skipped.length + " ไฟล์: " + idx.skipped.join(", ") : "") : "");
+  box.className = "index " + (s === "error" ? "stale" : s) + (note?.err || s === "error" || idx.skipped?.length ? " err" : "");
+  if (text) pill.textContent = text;
+  else pill.append("ดัชนีล่าสุด", el("small", { textContent: "แชทใช้ข้อมูลล่าสุดแล้ว" }));
+  box.replaceChildren(pill);
+}
+
+async function refresh() {
+  clearTimeout(poll);
+  try { idx = await call("/api/admin/index-status"); note = null; } catch (e) { note = { text: e.message, err: true }; }
+  renderIndex();
+  if (idx.state === "stale" || idx.state === "busy") poll = setTimeout(refresh, 1500);
 }
 
 async function call(url, opts) {
@@ -33,24 +40,8 @@ async function call(url, opts) {
   return data;
 }
 
-// every change saves at once; the index catches up after a short quiet period
-async function mutate(url, opts) { const r = await call(url, opts); scheduleReindex(); return r; }
-
-function scheduleReindex() {
-  stale = true; clearTimeout(timer); timer = setTimeout(reindex, 2500);
-  say("มีการเปลี่ยนแปลง · แชทยังใช้ข้อมูลเดิมจนกว่าจะอัปเดตดัชนี");
-}
-
-async function reindex() {
-  clearTimeout(timer);
-  if (busy) return scheduleReindex();
-  busy = true; stale = false;
-  say("กำลังอัปเดตดัชนี… (แชทจะรอสักครู่)");
-  try {
-    const r = await call("/api/admin/reindex", { method: "POST" });
-    if (!stale) say("ดัชนีล่าสุด · " + r.indexed + " ไฟล์" + (r.skipped.length ? " · ข้าม " + r.skipped.length + " ไฟล์: " + r.skipped.join(", ") : ""), r.skipped.length > 0);
-  } catch (e) { stale = true; say(e.message, true); } finally { busy = false; renderIndex(); }
-}
+// every change saves at once; the server re-indexes after a short quiet period
+async function mutate(url, opts) { const r = await call(url, opts); idx = { ...idx, state: "stale" }; note = null; renderIndex(); clearTimeout(poll); poll = setTimeout(refresh, 1500); return r; }
 
 async function run(fn) {
   try { await fn(); } catch (e) { say(e.message, true); }
@@ -325,7 +316,8 @@ $("mvsel").onclick = () => {
   $("mv").returnValue = ""; $("mv").showModal();
 };
 $("mv").addEventListener("close", () => { if ($("mv").returnValue === "ok") moveMany([...selected], $("dest").value); });
-window.addEventListener("beforeunload", (e) => { if (stale || busy || pending) e.preventDefault(); });
+window.addEventListener("beforeunload", (e) => { if (pending) e.preventDefault(); });
 
 try { const c = JSON.parse(sessionStorage.getItem(CACHE)); if (c) apply(...c); } catch (_) {}  // show last list while the fresh one loads
 load().catch((e) => say(e.message, true));
+refresh();

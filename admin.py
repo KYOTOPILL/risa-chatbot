@@ -3,6 +3,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -21,6 +22,7 @@ MAX_BYTES = 25 * 1024 * 1024
 ADMIN_USER = "admin"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 BAD_CATEGORY = re.compile(r"[/\\\x00-\x1f]")
+REINDEX_DELAY = 2.5  # seconds of quiet after the last change before the index rebuilds
 
 
 basic = HTTPBasic(auto_error=False)
@@ -46,6 +48,42 @@ def require_admin(request: Request, creds: HTTPBasicCredentials | None = Depends
 
 
 router = APIRouter(dependencies=[Depends(require_admin)])
+
+
+# Debounced re-index: every successful change restarts the timer; the index rebuilds once the changes stop.
+_timer: threading.Timer | None = None
+_gen = 0  # bumped on every change, so a run that finishes after a newer change stays "stale"
+_tlock = threading.Lock()
+index_status = {"state": "ok", "indexed": None, "skipped": [], "error": None}  # state: ok | stale | busy | error
+
+
+def _run(gen: int) -> None:
+    with _tlock:
+        index_status["state"] = "busy"
+    try:
+        r = reindex()
+        update = {"indexed": r["indexed"], "skipped": r["skipped"], "error": None}
+    except Exception as e:  # shown in the admin strip; the next change retries
+        update = {"error": str(e) or type(e).__name__}
+    with _tlock:
+        index_status.update(update)
+        index_status["state"] = "stale" if gen != _gen else "error" if update["error"] else "ok"
+
+
+def _reindex_later():  # dependency: its exit code runs only when the endpoint did not raise
+    yield
+    global _timer, _gen
+    with _tlock:
+        _gen += 1
+        index_status["state"] = "stale"
+        if _timer:
+            _timer.cancel()
+        _timer = threading.Timer(REINDEX_DELAY, _run, [_gen])
+        _timer.daemon = True
+        _timer.start()
+
+
+CHANGES = [Depends(_reindex_later)]
 
 
 def _category_dir(category: str, downloadable: bool) -> Path:
@@ -97,7 +135,7 @@ def list_files():
     return rows
 
 
-@router.post("/api/admin/upload")
+@router.post("/api/admin/upload", dependencies=CHANGES)
 def upload(files: list[UploadFile] = File(...), category: str = Form(""), downloadable: bool = Form(False)):
     target = _category_dir(category, downloadable)
     saved = []
@@ -124,7 +162,7 @@ def _prune(path: Path, root: Path) -> None:
         parent.rmdir()
 
 
-@router.post("/api/admin/replace")
+@router.post("/api/admin/replace", dependencies=CHANGES)
 def replace(path: str = Form(...), file: UploadFile = File(...)):
     """New version of an existing file: same path (so folder, name and downloadable stay), new content."""
     dst = _file(CONTENT_DIR.resolve(), path)
@@ -138,7 +176,7 @@ class DeleteIn(BaseModel):
     path: str
 
 
-@router.post("/api/admin/delete")
+@router.post("/api/admin/delete", dependencies=CHANGES)
 def delete(body: DeleteIn):
     root = CONTENT_DIR.resolve()
     path = _file(root, body.path)
@@ -173,7 +211,7 @@ class MoveIn(BaseModel):
     downloadable: bool | None = None
 
 
-@router.post("/api/admin/move")
+@router.post("/api/admin/move", dependencies=CHANGES)
 def move(body: MoveIn):
     """Rename, move to another folder and/or flip downloadable, in one call."""
     root = CONTENT_DIR.resolve()
@@ -201,6 +239,11 @@ def reindex():
             state.cache.clear()
 
 
+@router.get("/api/admin/index-status")
+def get_index_status():
+    return index_status
+
+
 def _folder(name: str) -> Path:
     if not name.strip():
         raise HTTPException(400, "ชื่อหมวดหมู่ไม่ถูกต้อง")
@@ -215,7 +258,7 @@ class RenameFolderIn(BaseModel):
     name: str
 
 
-@router.post("/api/admin/rename-folder")
+@router.post("/api/admin/rename-folder", dependencies=CHANGES)
 def rename_folder(body: RenameFolderIn):
     if not body.name.strip():
         raise HTTPException(400, "ชื่อหมวดหมู่ไม่ถูกต้อง")
@@ -226,7 +269,7 @@ def rename_folder(body: RenameFolderIn):
     return {"folder": body.name.strip()}
 
 
-@router.post("/api/admin/delete-folder")
+@router.post("/api/admin/delete-folder", dependencies=CHANGES)
 def delete_folder(body: FolderIn):
     shutil.rmtree(_folder(body.folder))  # the page confirms with the file count first
     return {"deleted": body.folder}

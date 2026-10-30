@@ -15,9 +15,12 @@ def env(tmp_path, monkeypatch):
     store = Store(tmp_path / "index", embed_fn=fake_embed)
     monkeypatch.setattr(admin, "CONTENT_DIR", content)
     monkeypatch.setattr(state, "get_store", lambda: store)
+    monkeypatch.setattr(admin, "REINDEX_DELAY", 3600)  # tests call /reindex themselves; the timer never fires
     server.app.dependency_overrides[admin.require_admin] = lambda: None
     yield content, store, TestClient(server.app)
     server.app.dependency_overrides.clear()
+    if admin._timer:
+        admin._timer.cancel()
 
 
 def up(client, name="a.txt", data=b"annual leave ten days", category="policy", downloadable=False):
@@ -118,6 +121,28 @@ def test_reindex_adds_and_removes_files_from_search(env):
     c.post("/api/admin/delete", json={"path": "policy/a.txt"})
     c.post("/api/admin/reindex")
     assert store.query("annual leave", k=1) == []
+
+
+def test_changes_reindex_by_themselves_after_a_quiet_period(env, monkeypatch):
+    import time
+    _, store, c = env
+    monkeypatch.setattr(admin, "REINDEX_DELAY", 0.1)
+    up(c)
+    assert c.get("/api/admin/index-status").json()["state"] in ("stale", "busy", "ok")
+    for _ in range(50):
+        st = c.get("/api/admin/index-status").json()
+        if st["state"] == "ok":
+            break
+        time.sleep(0.1)
+    assert st["state"] == "ok" and st["indexed"] == 1
+    assert store.query("annual leave", k=1)
+
+
+def test_failed_change_does_not_schedule_a_reindex(env):
+    _, _, c = env
+    admin._timer = None
+    assert c.post("/api/admin/delete", json={"path": "nope.txt"}).status_code == 404
+    assert admin._timer is None
 
 
 def test_reindex_clears_answer_cache(env):
