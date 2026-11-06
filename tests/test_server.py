@@ -218,3 +218,8 @@ def test_stream_cached_question_skips_the_model_and_errors_are_thai(client):
     with patch("rag.answer", side_effect=RuntimeError("boom")):
         _, events = stream(client, "คำถามใหม่")
     assert events == [{"error": server.ERROR_TEXT}]
+
+
+def test_pages_link_to_each_other(client):
+    assert 'href="/" target="_top"' in client.get("/chat").text  # _top: inside the drawer it must leave the iframe
+    assert 'href="/chat"' in client.get("/").text

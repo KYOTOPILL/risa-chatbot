@@ -238,6 +238,7 @@ async function boot() {
   const logout = document.getElementById("logout");
   document.getElementById("who").textContent = me ? me.name + " · " + ROLE[me.role] : "";
   logout.hidden = !me;
+  document.getElementById("chatlink").hidden = !me;
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
   if (!me) return loginScreen().catch(fail);
   users = await api("/mock-users");
