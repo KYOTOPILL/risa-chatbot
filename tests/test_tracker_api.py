@@ -324,3 +324,11 @@ def test_uploaded_file_download_is_limited_to_staff_and_owners(up):
     assert login("r1").get(f"/api/track/uploads/{uid}/file").status_code == 200
     assert login("r2").get(f"/api/track/uploads/{uid}/file").status_code == 404
     assert TestClient(server.app).get(f"/api/track/uploads/{uid}/file").status_code == 401
+
+
+# ---- Task 7: page ----
+def test_track_page_and_assets_served():
+    c = TestClient(server.app)
+    r = c.get("/track")
+    assert r.status_code == 200 and "track.js" in r.text
+    assert c.get("/static/track.js").status_code == 200 and c.get("/static/track.css").status_code == 200

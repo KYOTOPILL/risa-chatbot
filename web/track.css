@@ -1,0 +1,19 @@
+.tabs { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+.tabs .ghost[aria-current=true] { background: var(--accent); color: var(--accent-ink); }
+.list-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.list-row:first-of-type { border-top: 0; }
+.steps { list-style: none; margin: 8px 0 0; padding: 0; }
+.steps li { display: flex; gap: 10px; align-items: baseline; padding: 10px 0; }
+.steps .done { color: var(--muted); }
+.steps .now { font-weight: 700; color: var(--accent); }
+.steps .next { opacity: .55; }
+.finding { padding: 8px 12px; margin: 6px 0; border-left: 4px solid #f59e0b; background: color-mix(in srgb, #f59e0b 9%, transparent); border-radius: 6px; }
+.finding.missing { border-color: var(--err); background: color-mix(in srgb, var(--err) 8%, transparent); }
+.finding.dismissed { opacity: .5; text-decoration: line-through; }
+.doc { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 10px; }
+.doc.unsure, .stepedit.unsure { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 9%, transparent); }
+.stepedit { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-top: 10px; display: grid; gap: 8px; }
+input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; box-sizing: border-box; }
+.err { color: var(--err); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.checks { display: flex; gap: 14px; flex-wrap: wrap; }

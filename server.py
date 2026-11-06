@@ -148,4 +148,9 @@ def index():
     return FileResponse(WEB / "index.html")
 
 
+@app.get("/track")
+def track():
+    return FileResponse(WEB / "track.html")
+
+
 app.mount("/static", RevalidatingStatic(directory=WEB), name="static")
