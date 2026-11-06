@@ -106,6 +106,31 @@ Goals 2 and 3 of the meeting: step tracking and document check. Open `/`. Spec: 
 - `steps_ai.py`: `draft_steps(pages)` asks the model for a JSON list of steps (`title`, `documents`, `page`, `unsure`) from a scholarship document and raises `ValueError` on anything that is not that shape. `screen_document(...)` returns findings of kind `missing`, `incorrect` or `unclear`. `find_template(doc_name)` finds a blank form under `Form template/` by file-name substring. The model is a parameter (default `rag.chat`).
 - `tracker_api.py` (`/api/track/...`): mock login with a plain `uid` cookie from `MOCK_USERS` in `config.py` (`current_user` is the one place to swap for CMU login). Staff create types, drafts and submissions; AI step drafts stay `draft` until staff press approve. Researchers upload `.pdf` or `.docx` (max 10 MB, name sanitized, stored under `uploads/`, git-ignored) for the current step; AI screens once; the researcher may send even with findings. A scanned PDF or a bad model answer gives status `cannot_check`, which can still be sent. Staff see the queue, open the file, dismiss findings, then approve or return with a note.
 - Pages (spec `docs/superpowers/specs/2026-11-07-two-screen-redesign-design.md`): one login at `/`, then the role decides the screen. `/chat` is the old public chat page (`web/index.html`, `app.js`, unchanged). `/track` redirects to `/`. The pages link to each other: home header has `แชท` (`/chat`, shown after login), `/chat` has `หน้าหลัก` (`target="_top"` so it leaves the drawer iframe), `/admin` has `กลับหน้าหลัก`, the staff menu links to `/admin`. `/admin` is still the Basic-auth file manager; the staff menu links to it, because the mock login cookie is forgeable and must not guard file deletion.
+- Page map (3 HTML files):
+
+  | File | URL | Who | Login |
+  |---|---|---|---|
+  | `web/home.html` | `/` | researchers and staff | mock cookie |
+  | `web/index.html` | `/chat` | anyone | none (public) |
+  | `web/admin.html` | `/admin` | staff | Basic-auth password |
+
+  ```
+                    ┌──────────────── / (home.html) ────────────────┐
+                    │  login → researcher home  OR  staff workspace │
+                    └───────┬─────────────────────┬─────────────────┘
+          header "แชท" link │                     │ staff menu "📁 ไฟล์ความรู้"
+          (all logged in)   │                     │ (new tab, asks password)
+                            ▼                     ▼
+                    /chat (index.html)      /admin (admin.html)
+                            │                     │
+                            │ "หน้าหลัก"          │ "กลับหน้าหลัก"
+                            └──────► / ◄──────────┘
+
+     Researcher home also embeds /chat in the 💬 drawer (iframe);
+     there "หน้าหลัก" uses target="_top" so it leaves the iframe.
+  ```
+
+  No link from admin to chat or chat to admin (go through home; a public page should not point at the staff tool). Each page calls: home `/api/track/*`; chat `/api/chat/stream` and `/download/{doc_id}`; admin `/api/admin/*`.
 - `web/home.html`, `home.js`, `home.css`, `todo.js`: Thai UI, text always set with `textContent`. Researcher home: a "สิ่งที่ต้องทำ" list (`todoItems` in `todo.js`, pure and tested with node: returned documents first, then documents waiting for staff), then one stepper card per submission with upload and send inline, and a 💬 button that opens a drawer holding `/chat` in an iframe (loaded on first open; researchers only). Staff workspace: left menu 📥 รอตรวจ (count, opens first), 📋 ทุกงาน, 🧩 ประเภททุน, 📁 ไฟล์ความรู้ (link to `/admin`). Review rows show the AI finding count; an upload that could not be checked also shows no findings, so the label says "(หรือตรวจไม่ได้)" because status `sent` no longer records `cannot_check`.
 - Known limits: the cookie login is forgeable (mock only); staff cannot reassign a submission; no notifications; template match is a file-name substring; step changes by two staff at once are not locked.
 
