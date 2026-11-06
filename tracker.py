@@ -8,6 +8,15 @@ CREATE TABLE IF NOT EXISTS types (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY, type_id INTEGER NOT NULL REFERENCES types(id), version INTEGER NOT NULL,
     status TEXT NOT NULL, steps TEXT NOT NULL, source_file TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS submissions (
+    id INTEGER PRIMARY KEY, title TEXT NOT NULL, version_id INTEGER NOT NULL REFERENCES versions(id),
+    staff_id TEXT NOT NULL, current_step INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS submission_researchers (
+    submission_id INTEGER NOT NULL REFERENCES submissions(id), user_id TEXT NOT NULL, PRIMARY KEY (submission_id, user_id));
+CREATE TABLE IF NOT EXISTS step_events (
+    id INTEGER PRIMARY KEY, submission_id INTEGER NOT NULL REFERENCES submissions(id),
+    from_step INTEGER NOT NULL, to_step INTEGER NOT NULL, staff_id TEXT NOT NULL,
+    at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, note TEXT NOT NULL DEFAULT '');
 """
 
 
@@ -67,3 +76,62 @@ class Tracker:
             rows = db.execute(self._VERSION_SQL + " WHERE v.status = 'approved' AND v.version = "
                               "(SELECT MAX(version) FROM versions WHERE type_id = v.type_id AND status = 'approved') ORDER BY t.name").fetchall()
         return [self._version(r) for r in rows]
+
+    # ---- submissions ----
+    def create_submission(self, title: str, version_id: int, researcher_ids: list[str], staff_id: str) -> int:
+        v = self.get_version(version_id)
+        if not v or v["status"] != "approved":
+            raise ValueError("submission needs an approved type version")
+        if not researcher_ids:
+            raise ValueError("submission needs at least one researcher")
+        with self._db() as db:
+            sid = db.execute("INSERT INTO submissions (title, version_id, staff_id) VALUES (?, ?, ?)",
+                             (title, version_id, staff_id)).lastrowid
+            db.executemany("INSERT OR IGNORE INTO submission_researchers VALUES (?, ?)", [(sid, r) for r in researcher_ids])
+        return sid
+
+    def _submission(self, db, row) -> dict:
+        v = json.loads(row["steps"])
+        rs = [r[0] for r in db.execute("SELECT user_id FROM submission_researchers WHERE submission_id = ? ORDER BY user_id", (row["id"],))]
+        return {"id": row["id"], "title": row["title"], "type_name": row["type_name"], "staff_id": row["staff_id"],
+                "researcher_ids": rs, "current_step": row["current_step"], "step_count": len(v), "steps": v}
+
+    _SUB_SQL = ("SELECT s.*, v.steps, t.name AS type_name FROM submissions s JOIN versions v ON v.id = s.version_id "
+                "JOIN types t ON t.id = v.type_id")
+
+    def list_submissions(self, user_id: str, role: str) -> list[dict]:
+        sql, args = self._SUB_SQL, ()
+        if role != "staff":  # anything but staff is treated as a researcher: least privilege
+            sql += " WHERE s.id IN (SELECT submission_id FROM submission_researchers WHERE user_id = ?)"
+            args = (user_id,)
+        with self._db() as db:
+            out = [self._submission(db, r) for r in db.execute(sql + " ORDER BY s.id", args)]
+        for s in out:
+            del s["steps"]
+        return out
+
+    def get_submission(self, sid: int, user_id: str, role: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute(self._SUB_SQL + " WHERE s.id = ?", (sid,)).fetchone()
+            if not row:
+                return None
+            sub = self._submission(db, row)
+            if role != "staff" and user_id not in sub["researcher_ids"]:
+                return None
+            sub["events"] = [dict(e) for e in db.execute(
+                "SELECT from_step, to_step, staff_id, at, note FROM step_events WHERE submission_id = ? ORDER BY id", (sid,))]
+        return sub
+
+    def move_step(self, sid: int, staff_id: str, to_step: int, note: str = "") -> None:
+        """Only the staff in charge may move; to_step == step_count means completed."""
+        with self._db() as db:
+            row = db.execute(self._SUB_SQL + " WHERE s.id = ?", (sid,)).fetchone()
+            if not row:
+                raise ValueError("no such submission")
+            if row["staff_id"] != staff_id:
+                raise PermissionError("only the staff in charge can change this submission")
+            if not 0 <= to_step <= len(json.loads(row["steps"])):
+                raise ValueError("step out of range")
+            db.execute("UPDATE submissions SET current_step = ? WHERE id = ?", (to_step, sid))
+            db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
+                       (sid, row["current_step"], to_step, staff_id, note))
