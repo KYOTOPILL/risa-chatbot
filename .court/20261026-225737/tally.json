@@ -1,0 +1,92 @@
+{
+  "verdict": "NOT GUILTY",
+  "guilty": 3,
+  "not_guilty": 9,
+  "no_vote": 0,
+  "jurors": [
+    {
+      "juror": "The Accountant",
+      "vote": "NOT GUILTY",
+      "reason": "The change costs nothing to run (no index rebuild, no new model calls), is a no-op with one topic folder, and is uncommitted and easy to revert, so the downside is small even though its benefit is unproven.",
+      "fact": "The category embedding that would have forced an index rebuild and re-spend was reverted, so the remaining fix adds no indexing cost and does not change what is embedded.",
+      "flip": "A multi-topic test showed the folder filter returning a wrong file where the old search across all folders would have returned the right one, or the record showed a real cost, such as a forced index rebuild, attached to shipping it."
+    },
+    {
+      "juror": "The First-Time Customer",
+      "vote": "NOT GUILTY",
+      "reason": "As someone asking this bot for a file this week, I get the right receipt, the right announcement, and no file for a form that does not exist, and the untested folder filter does nothing yet, so it cannot make my experience worse than it is today.",
+      "fact": "The live requests on the real index returned exactly the right files, including one file for single-file requests, all 6 receipts for the \"all receipts\" request, and nothing for the nonexistent leave form.",
+      "flip": "The record showed a multi-topic test where a wrong category guess made the bot send the wrong file instead of falling back, or false file replies to ordinary questions containing words like \u0e1b\u0e23\u0e30\u0e01\u0e32\u0e28 or \u0e19\u0e42\u0e22\u0e1a\u0e32\u0e22."
+    },
+    {
+      "juror": "The Competitor",
+      "vote": "NOT GUILTY",
+      "reason": "As a rival I would copy the cheap name-index search and ignore this fix, because it is a small, uncommitted, reversible change whose live results are good and whose only risk is a filter that does nothing until a second folder exists.",
+      "fact": "The filter is a no-op with one topic folder, and the record shows no evidence it makes results worse than before, while the live checks (single receipt, all 6 receipts, announcement, nonexistent leave form returning nothing) all came out right.",
+      "flip": "A test with two or more real topic folders showed a wrong category guess returning a wrong file from a weak same-folder match under NAME_MAX instead of falling back."
+    },
+    {
+      "juror": "The Retired Judge",
+      "vote": "GUILTY",
+      "reason": "The regex fix is proven, but the headline category filter rests on hope, because nothing in the record shows it helping and its own design lets a weak in-folder hit beat a better match elsewhere.",
+      "fact": "The fallback fires only \"if nothing there is under NAME_MAX\", and the filter was tested only with a fake store and never on multi-topic data, so the record has no evidence for the mechanism the change is built around.",
+      "flip": "The filter were tested on real data from at least two topic folders, including a case where the category guess is wrong and the wrong folder holds a passing weak match, and it still returned the right file."
+    },
+    {
+      "juror": "The Teenager",
+      "vote": "NOT GUILTY",
+      "reason": "Staff only care that asking for a file gets them the right file, and it does that now, so the fix is boring but it works and nobody will notice the filter doing nothing.",
+      "fact": "Live requests returned exactly the right file, or all 6 receipts, and a nonexistent leave form returned nothing, and the filter is a no-op with one topic folder and nothing is committed yet.",
+      "flip": "A test with a second topic folder showed a wrong category guess returning the wrong file that the old search would have gotten right."
+    },
+    {
+      "juror": "The Engineer",
+      "vote": "GUILTY",
+      "reason": "As an engineer I would not ship a filter that cannot be exercised today and that returns a weak in-folder hit instead of falling back when the model's admittedly unreliable category guess is wrong, with thresholds fitted to 7 files and no real request set to catch regressions.",
+      "fact": "The fallback fires only when nothing in the guessed folder is under NAME_MAX, and the only multi-topic test is a unit test with a fake store, while the category guess is \"sometimes wrong\".",
+      "flip": "A test with at least two real topic folders showed that a wrong category guess still returns the right file (the fallback is triggered by comparing against the global best score, not just the NAME_MAX cutoff), plus a small set of real staff requests run against it."
+    },
+    {
+      "juror": "The Small-Business Owner",
+      "vote": "NOT GUILTY",
+      "reason": "It's a small, uncommitted, easy-to-undo change that does nothing harmful in a one-folder office today, and the real gaps (no staff request log, no multi-topic test) are cheap to close by watching real use after release, so I wouldn't hold it up.",
+      "fact": "The category filter has no practical effect with one topic folder, and a fallback restores the old search, so shipping it costs almost nothing now and the regex fix cured a real observed \"not found\" failure.",
+      "flip": "The record showed that with two topic folders a wrong category guess returns a weak in-folder file over a better match in another folder, or that staff get sent wrong files with no log of it."
+    },
+    {
+      "juror": "The Statistician",
+      "vote": "NOT GUILTY",
+      "reason": "The evidence is thin (7 files, one topic, no real requests), but that is a reason to measure after release rather than to block a small, uncommitted change that cannot alter behaviour in a one-folder setup and can be reverted.",
+      "fact": "The category filter has no practical effect with one topic folder, so committing it cannot make today's tested results worse, and the prosecution showed no case where it makes results worse than before.",
+      "flip": "The record showed a real multi-topic test, or a second topic folder already in use, where a wrong category guess returned a wrong file that the old all-folder search would have avoided."
+    },
+    {
+      "juror": "The Parent",
+      "vote": "NOT GUILTY",
+      "reason": "This is an internal office bot that sends blank forms, so a wrong file costs staff a few minutes and nothing worse, and the change is uncommitted, easy to undo, and can't hurt the one-folder setup we have today.",
+      "fact": "The category filter only narrows a search that already applies the same NAME_MAX cutoff across all folders, and it has no effect with one topic folder, so the record shows no new way for it to send a wrong file.",
+      "flip": "A test with two or more real topic folders showed a wrong category guess returning a wrong file that the old all-folder search would have gotten right."
+    },
+    {
+      "juror": "The Investor",
+      "vote": "NOT GUILTY",
+      "reason": "As an investor I would back this because the downside is tiny (a small, uncommitted, reversible change that is a no-op in a one-folder setup) and it fixes a failure that was actually observed, even though the filter's real upside is unproven.",
+      "fact": "The filter only narrows a search that already applies the same NAME_MAX cutoff across all folders, so the record shows no way it makes results worse than before, while the regex extension turned a real \"not found\" into the correct announcement.",
+      "flip": "A multi-topic test showed that a wrong category guess with a weak same-folder match (under 0.45) returns the wrong file where the old all-folder search returned the right one."
+    },
+    {
+      "juror": "The Designer",
+      "vote": "GUILTY",
+      "reason": "A stranger would ask what this change does today, and the honest answer is nothing you can see, because the main piece (the folder filter) has never run against more than one folder, so I can't call it a good fix as described.",
+      "fact": "The case says \"With only one topic folder today, the category filter has no practical effect yet\" and that multi-topic behaviour \"was not tested with real multi-topic data\". A wrong guess whose folder holds a weak match under NAME_MAX returns that match and never searches the other folders, where a better match could have won before the fix.",
+      "flip": "The filter was tested on a real second topic folder, including a case where the category guess is wrong, and it returned the same or a better file than the search without the filter."
+    },
+    {
+      "juror": "The Lawyer",
+      "vote": "NOT GUILTY",
+      "reason": "As a lawyer I see no new legal or liability exposure created by this fix, because downloads stay limited to the `shareable` folder, the files are blank internal forms and an announcement, and the filter can only narrow a search that already applied the same cutoff.",
+      "fact": "\"Only files in a folder named `shareable` are downloadable.\" That access boundary is unchanged by the fix, so the worst outcome of a wrong guess is a wrong file from the shareable set, not a leak of restricted material.",
+      "flip": "The record showed that `shareable` holds confidential or contractual documents (the new regex words include \u0e2a\u0e31\u0e0d\u0e0d\u0e32, \"contract\", and \u0e23\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e1a, \"regulation\"), or that the filter or regex lets a request reach files outside `shareable`."
+    }
+  ]
+}

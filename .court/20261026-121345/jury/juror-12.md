@@ -1,0 +1,4 @@
+VOTE: GUILTY
+REASON: As a lawyer I see an HR bot that may give wrong or superseded leave and money answers with no verified source version, no human fallback (dead hr@example.com), and an open admin page anyone could use to alter policy text, so the company would carry liability for what it tells staff, and the record shows no disclaimer, access control or audit trail.
+DECIDING FACT: "The admin page has no authentication" and "HR_CONTACT in config is still a placeholder (hr@example.com)", so policy content can be altered by anyone who reaches the page and the fallback for unanswered questions goes nowhere.
+WOULD FLIP IF: Admin access were authenticated and logged, HR_CONTACT pointed to a real HR channel, answers cited their source document and version with a "policy text governs" notice, and the index were confirmed to hold only current policy (for example the 2026 allowance, not 2024).

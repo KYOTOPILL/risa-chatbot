@@ -1,0 +1,50 @@
+{
+  "verdict": "GUILTY",
+  "guilty": 6,
+  "not_guilty": 0,
+  "no_vote": 0,
+  "jurors": [
+    {
+      "juror": "The Teenager",
+      "vote": "GUILTY",
+      "reason": "If the bot makes me stare at a spinner for ages on some mystery server nobody has even sized yet, I'm going back to just asking HR, and nobody's coming back next week.",
+      "fact": "Server specs (cores, RAM) and number of concurrent users are not yet decided, and the defense itself concedes there is no CPU latency measurement.",
+      "flip": "A real timing test on the actual CPU server showed Thai answers coming back in a few seconds with several people asking at once."
+    },
+    {
+      "juror": "The Statistician",
+      "vote": "GUILTY",
+      "reason": "A 10-question eval is too small to estimate real accuracy, and with no latency, hardware or user-count data, \"deploy as described\" asks us to approve a plan whose key unknowns are all unmeasured, and plans committed to before such measurement often miss on capacity.",
+      "fact": "The record states \"Server specs (cores, RAM) and number of concurrent users are not yet decided\" and contains no latency measurement, while the only quality evidence is \"Live evals passed 10/10\", which is only ten items.",
+      "flip": "The case included measured Thai-language latency and concurrency results on the actual target CPU server, plus an eval set of a few hundred questions with an acceptable pass rate, and the admin page behind authentication."
+    },
+    {
+      "juror": "The Parent",
+      "vote": "GUILTY",
+      "reason": "As a parent I would not hand my family's HR records and leave answers to a system where anyone on the network can delete or swap the policy documents, and where nobody has measured whether it even answers in time.",
+      "fact": "\"The admin page currently has no authentication,\" on a server whose documents are HR material with a raised sensitivity concern, while specs, user count and latency are all still unknown.",
+      "flip": "The case stated that admin authentication (or network restriction) is in place before launch and that a CPU latency test on the chosen server, in Thai, had been run and passed."
+    },
+    {
+      "juror": "The Small-Business Owner",
+      "vote": "GUILTY",
+      "reason": "I would not sign off on buying and running a server when nobody has decided its size, who will use it, or how fast it answers, and the open front door on the admin page means the first slow month could also be the month someone wipes the leave policy.",
+      "fact": "\"Server specs (cores, RAM) and number of concurrent users are not yet decided\" while the admin page \"currently has no authentication\" and the record holds no CPU latency measurement.",
+      "flip": "A load test on the actual CPU server, with Thai questions at the expected number of users, showed acceptable answer times, and the admin page was locked behind authentication or a closed network before launch."
+    },
+    {
+      "juror": "The Retired Judge",
+      "vote": "GUILTY",
+      "reason": "The case asks for approval of a CPU-only 8B deployment when the record holds no latency figure, no hardware spec and no user count, and the defense carries the burden of showing it works but offers only hope that the missing facts will turn out well.",
+      "fact": "The record states \"Server specs (cores, RAM) and number of concurrent users are not yet decided,\" and the defense itself concedes there is no CPU latency measurement, no RAM sizing and no load estimate.",
+      "flip": "The case included a measured latency run of qwen3:8b with bge-m3 on the actual target CPU server, using Thai questions at the expected number of concurrent users, with admin authentication added."
+    },
+    {
+      "juror": "The Competitor",
+      "vote": "GUILTY",
+      "reason": "As a rival selling a hosted Thai HR assistant, I would simply ignore a slow CPU-only 8B bot with an open admin page that has never been timed, because it would sink itself on day-one latency and trust.",
+      "fact": "The record says \"Server specs (cores, RAM) and number of concurrent users are not yet decided\" and has no latency figure, and the defense conceded that latency, RAM and load are unmeasured.",
+      "flip": "The case included a measured Thai-language latency and concurrency test on the actual CPU server, with admin authentication in place."
+    }
+  ]
+}

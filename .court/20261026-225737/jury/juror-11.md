@@ -1,0 +1,4 @@
+VOTE: GUILTY
+REASON: A stranger would ask what this change does today, and the honest answer is nothing you can see, because the main piece (the folder filter) has never run against more than one folder, so I can't call it a good fix as described.
+DECIDING FACT: The case says "With only one topic folder today, the category filter has no practical effect yet" and that multi-topic behaviour "was not tested with real multi-topic data". A wrong guess whose folder holds a weak match under NAME_MAX returns that match and never searches the other folders, where a better match could have won before the fix.
+WOULD FLIP IF: The filter was tested on a real second topic folder, including a case where the category guess is wrong, and it returned the same or a better file than the search without the filter.

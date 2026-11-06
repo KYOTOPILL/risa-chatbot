@@ -1,0 +1,2 @@
+# one term per line: term = meaning. Lines starting with # are skipped; the bot reads the rest.
+settlement, Settlement Allowance = เงินสนับสนุนค่าใช้จ่ายแรกเข้า 6,000 บาท ของทุน CMU Presidential Scholarship (ไม่เกี่ยวกับการชดใช้ทุน)

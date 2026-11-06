@@ -1,0 +1,92 @@
+{
+  "verdict": "GUILTY",
+  "guilty": 12,
+  "not_guilty": 0,
+  "no_vote": 0,
+  "jurors": [
+    {
+      "juror": "The Accountant",
+      "vote": "GUILTY",
+      "reason": "I follow the money, and the only number offered to justify relying on this bot for employees' leave and allowance answers is ten questions, with no cost, latency or error-rate figure behind it, so \"as described\" is not good enough to rely on.",
+      "fact": "The only quality evidence is \"live evals passed 10/10\" on a 10-question set, and the defense itself concedes ten is small while the record gives no coverage of domains, Thai phrasing or unanswerable questions.",
+      "flip": "A larger eval set (dozens of questions across all four document types, including Thai phrasing and no-answer cases) were shown with a measured error rate, plus the admin auth and HR_CONTACT blockers closed and latency measured on the target server."
+    },
+    {
+      "juror": "The First-Time Customer",
+      "vote": "GUILTY",
+      "reason": "As an employee I would not trust this with my leave or money questions this week, because it is not deployable as described and nothing shows it answers correctly beyond ten questions.",
+      "fact": "The record says the admin page has no authentication and HR_CONTACT is still the placeholder hr@example.com (the defense conceded both as blockers), while the only quality evidence is 10/10 on a 10-question eval set.",
+      "flip": "The admin page were locked down, a real HR contact were set, and a larger eval set covering all four document types plus unanswerable Thai questions passed."
+    },
+    {
+      "juror": "The Competitor",
+      "vote": "GUILTY",
+      "reason": "As a rival I would ignore this today, because a bot with an open admin page, a dead fallback address and 10 evals is a prototype, not something staff can rely on, and I would only worry once those gaps are closed.",
+      "fact": "The defense itself conceded that the unauthenticated admin page and the placeholder HR_CONTACT (hr@example.com) cannot ship, and the only quality evidence is 10/10 on a 10-question eval set.",
+      "flip": "The case were restated as a pre-launch prototype with admin auth, a real HR contact and a larger eval set (covering all four document types, Thai phrasing and unanswerable questions) as required gates before any employee use."
+    },
+    {
+      "juror": "The Retired Judge",
+      "vote": "GUILTY",
+      "reason": "The claim is \"good enough to rely on\", and the only proof offered is ten passing questions, with no record of what they cover, so that is hope and not evidence.",
+      "fact": "\"the eval set is 10 questions\" (live evals passed 10/10), with nothing in the record showing coverage of the four HR domains, Thai phrasing, unanswerable questions, or the new scholarship PDF.",
+      "flip": "The record showed a larger eval set (for example 50 or more questions) written independently of the tuning, covering all four domains and no-answer cases, with measured abstention and wrong-answer rates."
+    },
+    {
+      "juror": "The Teenager",
+      "vote": "GUILTY",
+      "reason": "If it's slow or sends me to a fake email on my first try I'm never opening it again, and nobody's checked either, so \"rely on it as is\" is a no from me.",
+      "fact": "The record has no measured latency and the target server is possibly CPU-only and not sized, and HR_CONTACT is still the placeholder hr@example.com, so the first-impression experience is unverified.",
+      "flip": "The record showed a measured reply time that is acceptable on the real server, a real HR contact set, and a larger eval set that passed."
+    },
+    {
+      "juror": "The Engineer",
+      "vote": "GUILTY",
+      "reason": "As an engineer I would not rely on it today: the stack is sound and sensibly built, but nothing has been measured (10 evals, no latency, unsized CPU box, unauthenticated admin that can rewrite policy), so \"good enough to rely on\" is unproven.",
+      "fact": "The record shows only 10 eval questions, no measured latency, a possibly CPU-only unsized server, and an admin page with no authentication, so reliability, speed and integrity are all unverified.",
+      "flip": "A larger eval set (covering all four document domains, Thai phrasing and unanswerable questions, written independently of the tuning) passed, latency was measured acceptable on the target server, and admin auth plus a real HR_CONTACT were in place."
+    },
+    {
+      "juror": "The Small-Business Owner",
+      "vote": "GUILTY",
+      "reason": "I would not open the shop doors on this yet: ten test questions, an unlocked admin page and a dead HR address mean nobody has proven it is safe to hand to employees on Monday morning.",
+      "fact": "The defense itself conceded that the admin page has no authentication and HR_CONTACT is still the placeholder hr@example.com, so the project cannot go ahead as described, on top of an eval set of only 10 questions.",
+      "flip": "The case were reframed as a prototype that ships only after admin authentication, a real HR contact, a larger eval set covering all four document types and a measured latency on the target server."
+    },
+    {
+      "juror": "The Statistician",
+      "vote": "GUILTY",
+      "reason": "Ten passes out of ten questions only rules out a true failure rate above roughly 26% at 95% confidence, so it cannot support relying on this for HR answers, especially with hand-tuned thresholds and no record of which domains or Thai phrasings the questions covered.",
+      "fact": "The eval set is 10 questions (live evals passed 10/10), and the record does not say what they cover or whether they were written before or after tuning.",
+      "flip": "A held-out set of around 100 or more questions, covering all four document domains plus unanswerable ones and written independently of the tuning, showed an error rate near 5% or lower with safe abstention on the unanswerable ones."
+    },
+    {
+      "juror": "The Parent",
+      "vote": "GUILTY",
+      "reason": "As a parent I would not trust my family's leave days or travel money to a bot that was checked on only ten questions, has an admin page anyone can use to change the policies, and sends people who get no answer to a dead email address.",
+      "fact": "The defense itself conceded that the unauthenticated admin page cannot ship to employees and that the placeholder hr@example.com would send users to a dead address, so the case fails \"as described\" by its own admission.",
+      "flip": "The admin page were behind real authentication, HR_CONTACT pointed to a working address, and a much larger eval set covering all four policy areas in Thai, including questions with no answer, passed."
+    },
+    {
+      "juror": "The Investor",
+      "vote": "GUILTY",
+      "reason": "I would fund a cheap pilot of this, but not rely on it for HR answers as described, because the upside is modest, the failure cost (wrong money or leave answers) is real, and the only evidence of quality is 10 questions with an open admin page and a dead HR contact.",
+      "fact": "The eval set is 10 questions and the defense itself conceded that the unauthenticated admin page and placeholder hr@example.com cannot ship as they stand.",
+      "flip": "A larger eval set (dozens of Thai questions across all four domains, including unanswerable ones, written independently of the tuning) passed, with admin auth added, a real HR_CONTACT set, and latency measured on the target server."
+    },
+    {
+      "juror": "The Designer",
+      "vote": "GUILTY",
+      "reason": "A stranger asked \"can employees rely on this for HR answers?\" would see a dead placeholder contact, an open admin page and ten test questions, and the honest five-second answer is \"not yet\".",
+      "fact": "Both sides agree the admin page has no authentication and HR_CONTACT is still hr@example.com, so the bot as described cannot be put in front of employees.",
+      "flip": "The case were only about answer quality on a larger, domain-covering Thai eval set, with auth and the real HR contact already in place."
+    },
+    {
+      "juror": "The Lawyer",
+      "vote": "GUILTY",
+      "reason": "As a lawyer I see an HR bot that may give wrong or superseded leave and money answers with no verified source version, no human fallback (dead hr@example.com), and an open admin page anyone could use to alter policy text, so the company would carry liability for what it tells staff, and the record shows no disclaimer, access control or audit trail.",
+      "fact": "\"The admin page has no authentication\" and \"HR_CONTACT in config is still a placeholder (hr@example.com)\", so policy content can be altered by anyone who reaches the page and the fallback for unanswered questions goes nowhere.",
+      "flip": "Admin access were authenticated and logged, HR_CONTACT pointed to a real HR channel, answers cited their source document and version with a \"policy text governs\" notice, and the index were confirmed to hold only current policy (for example the 2026 allowance, not 2024)."
+    }
+  ]
+}

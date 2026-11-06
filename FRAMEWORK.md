@@ -52,12 +52,13 @@ Two ideas carry the whole design:
 | inner `run(name, args)` | Executes one tool call against the store and returns text for the model. |
 | `chat_tools(messages, tools, tool_choice)` | One OpenAI call with tool support. `chat()` is the plain version, still used for summaries. |
 | `chat_tools_stream(..., on_delta)` | Same call with `stream: true`; answer text goes to `on_delta` as it arrives, tool-call fragments are joined, token usage is still counted. `on_delta(None)` means the text so far was not the answer (a tool call followed). `answer(..., llm=chat_tools_stream, on_delta=...)` streams only the final round, and `_hold_markers` keeps `NOT_FOUND` / `OUT_OF_SCOPE` from showing before they are swapped for the Thai message. |
-| `AGENT_SYSTEM` | System prompt: tool descriptions, Thai-only, tool results are data, reply `NOT_FOUND` when nothing fits, `OUT_OF_SCOPE` when the question has nothing to do with the company (weather, recipes, coding). |
+| `AGENT_SYSTEM` | System prompt in four labeled sections: ROLE, TOOLS, RESPONSE GUIDELINES, FORMAT. The guidelines are the lessons from fixing real answers: answer only the exact thing asked (related is not the same); if documents only cover a related subject, say so and name what does exist; overview questions get one sentence per topic and no file list; direct answer first, lists only for 3+ items, about 8 lines at most; exact numbers; dates only for status questions; `NOT_FOUND` only when nothing relevant exists, `OUT_OF_SCOPE` for off-topic; Thai only, no markdown, polite `ค่ะ`. When a new lesson comes up, add it to the guidelines (and a case to `evals/questions.json`), not a one-off patch. |
 | `TOOLS` | The four tool definitions below. |
 | `_dedupe`, `_context` | Drop overlapping chunks and format search results with their modified date. |
 | `is_mostly_thai` | Detects an English reply so it can be retried once in Thai. |
 | `Reply`, `Turn` | Result and history dataclasses. |
 | `usage` | Running totals of calls, prompt tokens and completion tokens, filled by `_post` from OpenAI's `usage` field. `evals/run_eval.py` prints it. |
+| `_glossary()` | Reads `glossary.txt` (project root, one `term = meaning` per line, `#` lines skipped) and appends it to the system prompt on every answer, so a term the model would translate wrongly (for example `settlement` = first-arrival allowance, not repayment) has a fixed meaning. Edit the file, no restart needed. |
 | `MAX_ANSWER_TOKENS` | Output cap (600) sent as `max_completion_tokens` by `chat_tools`. Summaries use `chat()` and are not capped. |
 
 The four tools:
@@ -132,7 +133,8 @@ For "ลาพักร้อนกี่วัน" the model calls `search_docu
 | Tools, mini | 20 |
 | Tools, nano | 21 to 22 |
 
-- Bigger model did not help, so `gpt-5.4-nano` stays.
+- Bigger model did not help, so `gpt-5.4-nano` stays. Checked again on 35 cases (with 9 hard questions: slang, typos, indirect wording): nano 29, mini 26 on the same index; `gpt-5.4-mini` answered some hard questions more carefully but lost on file requests and follow-ups. A stale index (2 files had no file-name entry) cost both models points; after re-indexing nano scores 33/35. The two open failures: `ขอใบเสร็จค่าเดินทางมา มช` also sends the hometown receipt (ambiguous), and the `settlement` conditions question still gets a made-up list instead of "not found" (`glossary.txt` fixes the meaning, not this).
+- Eval noise: `gpt-5.4-nano` flips on about 3 of 35 cases between identical runs (the same question passed, then failed). Treat score differences of 3 or less as noise; repeat before judging a prompt change. Guideline rewrite scored 27, 29, 30 against 33 for the old prompt, with failures that moved between runs.
 - Tool path is about 3 s per question (rules path was about 2 s).
 - One summary call per new or changed file, downloadable or not. Estimated well under 1 USD for 500 files (not verified against current prices).
 
