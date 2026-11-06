@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from typing_extensions import Annotated
 
 import admin
+import tracker_api
 import downloads
 import rag
 import state
@@ -49,6 +50,7 @@ class RevalidatingStatic(StaticFiles):
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(admin.router)
+app.include_router(tracker_api.router)
 
 
 @app.post("/api/chat")

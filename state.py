@@ -3,7 +3,9 @@ from contextlib import contextmanager
 from functools import lru_cache
 
 import config
+from config import TRACKER_DB
 from store import Store
+from tracker import Tracker
 
 # one re-index at a time; chat never waits for it (each question runs in its own thread, the model servers queue themselves)
 lock = threading.Lock()
@@ -17,6 +19,11 @@ CACHE_MAX = 500
 @lru_cache
 def get_store() -> Store:
     return Store()
+
+
+@lru_cache
+def get_tracker() -> Tracker:
+    return Tracker(TRACKER_DB)
 
 
 _busy: dict[str, int] = {}  # ip -> questions being answered right now; entry removed at 0
