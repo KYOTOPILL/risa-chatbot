@@ -30,3 +30,8 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 .chat-drawer[hidden], .chat-fab[hidden] { display: none; }
 .chat-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .chat-frame { flex: 1; width: 100%; border: 0; }
+.login { margin-top: 18px; }
+.login-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.login-card { display: flex; flex-direction: column; gap: 10px; }
+.login-card .primary { width: 100%; }
+@media (max-width: 700px) { .login-grid { grid-template-columns: 1fr; } }

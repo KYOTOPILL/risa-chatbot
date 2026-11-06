@@ -35,12 +35,12 @@ const act = (fn) => async (ev) => { try { await fn(ev); } catch (e) { fail(e); }
 // ---------- login ----------
 async function loginScreen() {
   users = await api("/mock-users");
-  show(h("section", { class: "card" },
-    h("h2", {}, "เข้าสู่ระบบ (ระบบจำลอง)"),
-    h("p", { class: "muted" }, "ตอนนี้เป็นบัญชีทดลอง ภายหลังจะเปลี่ยนเป็นบัญชีอีเมล CMU"),
-    users.map((u) => h("div", { class: "list-row" },
-      h("span", {}, u.name, " ", h("span", { class: "muted" }, ROLE[u.role] + " · " + u.id)),
-      h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/login", send("POST", { user_id: u.id })); start(); }) }, "เข้าสู่ระบบ")))));
+  const card = (role, title, hint) => h("section", { class: "card login-card" }, h("h2", {}, title), h("p", { class: "muted" }, hint),
+    users.filter((u) => u.role === role).map((u) => h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/login", send("POST", { user_id: u.id })); start(); }) }, u.name)));
+  show(h("div", { class: "login" }, h("h2", {}, "เข้าสู่ระบบ (ระบบจำลอง)"), h("p", { class: "muted" }, "ตอนนี้เป็นบัญชีทดลอง ภายหลังจะเปลี่ยนเป็นบัญชีอีเมล CMU"),
+    h("div", { class: "login-grid" },
+      card("researcher", "🎓 นักวิจัย", "ดูความคืบหน้า ส่งเอกสาร ถาม AI"),
+      card("staff", "🧑‍💼 เจ้าหน้าที่", "ตรวจเอกสาร ย้ายขั้นตอน จัดการประเภททุน"))));
 }
 
 // ---------- shared: stepper ----------
