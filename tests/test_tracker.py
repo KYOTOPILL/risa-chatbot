@@ -128,3 +128,84 @@ def test_uploads_latest_wins_and_status_changes(sub):
     assert tk.get_upload(999) is None
     with pytest.raises(ValueError):
         tk.set_upload_status(u2, "bogus")
+
+
+# ---- Task 6: staff review ----
+DSTEPS = [{"title": "Submit", "documents": ["Form A", "Form B"], "page": None, "unsure": False},
+          {"title": "Review", "documents": [], "page": None, "unsure": False}]
+
+
+@pytest.fixture
+def docs(tk):
+    v = tk.create_type("CMU", DSTEPS, "cmu.pdf")
+    tk.approve(v)
+    sid = tk.create_submission("S", v, ["r1"], "s1")
+
+    def sent(doc, step=0):
+        u = tk.add_upload(sid, step, doc, f"{doc}.pdf", f"/p/{doc}.pdf", [{"kind": "missing", "text": "x"}], "screened")
+        tk.set_upload_status(u, "sent")
+        return u
+    return tk, sid, sent
+
+
+def test_approve_one_of_two_documents_does_not_advance(docs):
+    tk, sid, sent = docs
+    assert tk.review_upload(sent("Form A"), "s1", "approve", [], "") is False
+    assert tk.get_submission(sid, "s1", "staff")["current_step"] == 0
+
+
+def test_approve_last_document_advances_exactly_one_step_and_logs_event(docs):
+    tk, sid, sent = docs
+    tk.review_upload(sent("Form A"), "s1", "approve", [], "")
+    assert tk.review_upload(sent("Form B"), "s1", "approve", [], "") is True
+    got = tk.get_submission(sid, "s1", "staff")
+    assert got["current_step"] == 1 and [(e["from_step"], e["to_step"]) for e in got["events"]] == [(0, 1)]
+
+
+def test_return_keeps_step_and_stores_note(docs):
+    tk, sid, sent = docs
+    u = sent("Form A")
+    assert tk.review_upload(u, "s1", "return", [], "fix budget") is False
+    assert tk.get_upload(u)["status"] == "returned" and tk.get_upload(u)["note"] == "fix budget"
+    assert tk.get_submission(sid, "s1", "staff")["current_step"] == 0
+
+
+def test_reupload_after_return_then_approve_advances(docs):
+    tk, sid, sent = docs
+    tk.review_upload(sent("Form A"), "s1", "return", [], "again")
+    tk.review_upload(sent("Form A"), "s1", "approve", [], "")  # newer upload replaces the returned one
+    assert tk.review_upload(sent("Form B"), "s1", "approve", [], "") is True
+
+
+def test_review_by_other_staff_and_unsent_upload_rejected(docs):
+    tk, sid, sent = docs
+    u = sent("Form A")
+    with pytest.raises(PermissionError):
+        tk.review_upload(u, "s2", "approve", [], "")
+    fresh = tk.add_upload(sid, 0, "Form B", "b.pdf", "/p/b.pdf", [], "screened")
+    with pytest.raises(ValueError):
+        tk.review_upload(fresh, "s1", "approve", [], "")
+    with pytest.raises(ValueError):
+        tk.review_upload(u, "s1", "maybe", [], "")
+
+
+def test_dismissed_findings_stored(docs):
+    tk, sid, sent = docs
+    u = sent("Form A")
+    tk.review_upload(u, "s1", "approve", [0], "advisor counted")
+    assert tk.get_upload(u)["dismissed"] == [0]
+
+
+def test_step_with_no_documents_never_auto_advances(docs):
+    tk, sid, sent = docs
+    tk.move_step(sid, "s1", 1)
+    assert tk.review_upload(sent("Anything", step=1), "s1", "approve", [], "") is False
+    assert tk.get_submission(sid, "s1", "staff")["current_step"] == 1
+
+
+def test_review_queue_lists_only_sent(docs):
+    tk, sid, sent = docs
+    u = sent("Form A")
+    tk.add_upload(sid, 0, "Form B", "b.pdf", "/p/b.pdf", [], "screened")
+    q = tk.review_queue()
+    assert [x["id"] for x in q] == [u] and q[0]["submission_title"] == "S" and q[0]["staff_id"] == "s1"

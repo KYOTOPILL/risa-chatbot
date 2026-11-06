@@ -6,6 +6,7 @@ import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import state
@@ -51,6 +52,12 @@ class SubmissionIn(BaseModel):
 
 class StepsIn(BaseModel):
     steps: list[dict]
+
+
+class ReviewIn(BaseModel):
+    decision: str
+    dismissed: list[int] = []
+    note: str = ""
 
 
 class MoveIn(BaseModel):
@@ -243,3 +250,34 @@ def send_upload(uid: int, user: User = Depends(current_user)):
         raise HTTPException(400, "already sent")
     tk.set_upload_status(uid, "sent")
     return {"status": "sent"}
+
+
+def _public(up: dict) -> dict:
+    return {k: v for k, v in up.items() if k != "path"}  # server file paths stay on the server
+
+
+@router.get("/review-queue")
+def review_queue(_: User = Depends(require_staff)):
+    return [_public(u) for u in state.get_tracker().review_queue()]
+
+
+@router.post("/uploads/{uid}/review")
+def review(uid: int, body: ReviewIn, user: User = Depends(require_staff)):
+    tk = state.get_tracker()
+    if tk.get_upload(uid) is None:
+        raise HTTPException(404, "not found")
+    try:
+        return {"advanced": tk.review_upload(uid, user.id, body.decision, body.dismissed, body.note)}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/uploads/{uid}/file")
+def upload_file(uid: int, user: User = Depends(current_user)):
+    tk = state.get_tracker()
+    up = tk.get_upload(uid)
+    if up is None or tk.get_submission(up["submission_id"], user.id, user.role) is None:
+        raise HTTPException(404, "not found")
+    return FileResponse(up["path"], filename=up["filename"])

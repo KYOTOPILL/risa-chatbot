@@ -272,3 +272,55 @@ def test_hostile_upload_rejected_and_nothing_written(up, tmp_path):
     _, sid, _ = up
     assert put(login("r1"), sid, name="x.exe").status_code == 400
     assert not (tmp_path / "uploads").exists() or not [p for p in (tmp_path / "uploads").rglob("*") if p.is_file()]
+
+
+# ---- Task 6: review ----
+def review(client, uid, decision="approve", dismissed=(), note=""):
+    return client.post(f"/api/track/uploads/{uid}/review", json={"decision": decision, "dismissed": list(dismissed), "note": note})
+
+
+def sent_upload(sid, doc="Form A"):
+    r = login("r1")
+    uid = put(r, sid, doc=doc).json()["upload_id"]
+    r.post(f"/api/track/uploads/{uid}/send")
+    return uid
+
+
+def test_review_queue_and_approve_advances(up):
+    tk, sid, _ = up
+    a, b = sent_upload(sid, "Form A"), sent_upload(sid, "Form B")
+    s1 = login("s1")
+    q = s1.get("/api/track/review-queue").json()
+    assert {x["id"] for x in q} == {a, b} and "path" not in q[0]
+    assert review(s1, a).json() == {"advanced": False}
+    assert review(s1, b).json() == {"advanced": True}
+    assert tk.get_submission(sid, "s1", "staff")["current_step"] == 1
+
+
+def test_return_shows_note_to_researcher(up):
+    _, sid, _ = up
+    uid = sent_upload(sid)
+    review(login("s1"), uid, "return", note="fix budget")
+    docs = login("r1").get(f"/api/track/submissions/{sid}").json()["uploads"]
+    assert docs[0]["status"] == "returned" and docs[0]["note"] == "fix budget" and "path" not in docs[0]
+
+
+def test_review_permissions_and_errors(up):
+    _, sid, _ = up
+    uid = sent_upload(sid)
+    assert review(login("r1"), uid).status_code == 403
+    assert login("r1").get("/api/track/review-queue").status_code == 403
+    assert review(login("s2"), uid).status_code == 403
+    assert review(login("s1"), 999).status_code == 404
+    assert review(login("s1"), uid, "maybe").status_code == 400
+    assert review(login("s1"), uid).status_code == 200
+    assert review(login("s1"), uid).status_code == 400  # already reviewed
+
+
+def test_uploaded_file_download_is_limited_to_staff_and_owners(up):
+    _, sid, _ = up
+    uid = sent_upload(sid)
+    assert login("s1").get(f"/api/track/uploads/{uid}/file").status_code == 200
+    assert login("r1").get(f"/api/track/uploads/{uid}/file").status_code == 200
+    assert login("r2").get(f"/api/track/uploads/{uid}/file").status_code == 404
+    assert TestClient(server.app).get(f"/api/track/uploads/{uid}/file").status_code == 401

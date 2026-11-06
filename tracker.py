@@ -131,6 +131,9 @@ class Tracker:
                 return None
             sub["events"] = [dict(e) for e in db.execute(
                 "SELECT from_step, to_step, staff_id, at, note FROM step_events WHERE submission_id = ? ORDER BY id", (sid,))]
+        cur = sub["current_step"]
+        sub["uploads"] = [{k: v for k, v in u.items() if k != "path"}
+                          for u in (self.latest_uploads(sid, cur).values() if cur < sub["step_count"] else [])]
         return sub
 
     def move_step(self, sid: int, staff_id: str, to_step: int, note: str = "") -> None:
@@ -175,3 +178,34 @@ class Tracker:
         with self._db() as db:
             rows = db.execute("SELECT * FROM uploads WHERE submission_id = ? AND step_index = ? ORDER BY id", (sid, step_index)).fetchall()
         return {r["doc_name"]: self._upload(r) for r in rows}
+
+    def review_queue(self) -> list[dict]:
+        """Sent uploads waiting for the staff check, oldest first."""
+        with self._db() as db:
+            rows = db.execute("SELECT u.*, s.title AS submission_title, s.staff_id FROM uploads u "
+                              "JOIN submissions s ON s.id = u.submission_id WHERE u.status = 'sent' ORDER BY u.id").fetchall()
+        return [self._upload(r) for r in rows]
+
+    def review_upload(self, upload_id: int, staff_id: str, decision: str, dismissed: list[int], note: str) -> bool:
+        """Staff final check. Returns True when approving this upload advanced the submission to its next step."""
+        up = self.get_upload(upload_id)
+        if up is None:
+            raise ValueError("no such upload")
+        with self._db() as db:
+            row = db.execute(self._SUB_SQL + " WHERE s.id = ?", (up["submission_id"],)).fetchone()
+        if row["staff_id"] != staff_id:
+            raise PermissionError("only the staff in charge can review this upload")
+        if up["status"] != "sent" or decision not in ("approve", "return"):
+            raise ValueError("upload is not waiting for review, or bad decision")
+        with self._db() as db:
+            db.execute("UPDATE uploads SET status = ?, dismissed = ?, note = ?, reviewed_by = ? WHERE id = ?",
+                       ("approved" if decision == "approve" else "returned", json.dumps(dismissed), note, staff_id, upload_id))
+        if decision != "approve":
+            return False
+        steps = json.loads(row["steps"])
+        docs = steps[up["step_index"]]["documents"] if up["step_index"] < len(steps) else []
+        latest = self.latest_uploads(up["submission_id"], up["step_index"])
+        if up["step_index"] == row["current_step"] and docs and all(latest.get(d, {}).get("status") == "approved" for d in docs):
+            self.move_step(up["submission_id"], staff_id, row["current_step"] + 1, "auto: all documents approved")
+            return True
+        return False
