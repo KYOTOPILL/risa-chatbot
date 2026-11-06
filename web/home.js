@@ -81,7 +81,7 @@ function subCard(sub) {
   return h("section", { class: "card", id: "sub-" + sub.id },
     h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · เจ้าหน้าที่ผู้ดูแล: " + (staff ? staff.name : sub.staff_id)), stepper(sub),
     step ? h("div", {}, h("h3", {}, "เอกสารสำหรับขั้นตอนนี้"),
-      step.documents.length ? step.documents.map((name) => docRow(sub, name, researcherHome)) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
+      step.documents.length ? step.documents.map((name) => docRow(sub, name, () => researcherHome().catch(fail))) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
       : h("p", {}, "งานนี้เสร็จสิ้นแล้ว"));
 }
 
@@ -232,7 +232,7 @@ function chatDrawer() {
 }
 
 // ---------- start ----------
-async function start() {
+async function boot() {
   document.querySelectorAll("#chat-drawer, #chat-fab").forEach((e) => e.remove());
   try { me = await api("/me"); } catch { me = null; }
   const logout = document.getElementById("logout");
@@ -241,7 +241,10 @@ async function start() {
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
   if (!me) return loginScreen().catch(fail);
   users = await api("/mock-users");
-  (me.role === "staff" ? staffHome : researcherHome)();
+  await (me.role === "staff" ? staffHome : researcherHome)();
   if (me.role === "researcher") chatDrawer();
 }
+
+// any failed load shows an alert instead of leaving a blank page
+function start() { return boot().catch(fail); }
 start();
