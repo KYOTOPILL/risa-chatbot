@@ -2,6 +2,9 @@
 import json
 import re
 
+from pathlib import Path
+
+from config import CONTENT_DIR
 from rag import chat
 
 DRAFT_PROMPT = (
@@ -37,3 +40,32 @@ def draft_steps(pages: list[str], llm=chat) -> list[dict]:
                       "page": page if isinstance(page, int) else None,
                       "unsure": it.get("unsure") is True})
     return steps
+
+
+SCREEN_PROMPT = (
+    "You check a document an applicant uploaded for a scholarship or funding step. Find problems: "
+    '"missing" (required information absent), "incorrect" (contradicts itself or looks wrong), "unclear" (ambiguous). '
+    'Answer with a JSON array only: [{"kind": "missing"|"incorrect"|"unclear", "text": short description}]. '
+    "Answer [] if there are no problems. Write descriptions in the document's own language."
+)
+KINDS = {"missing", "incorrect", "unclear"}
+
+
+def find_template(doc_name: str, content_dir: Path = CONTENT_DIR) -> Path | None:
+    # ponytail: substring match on the file name, use an explicit template link on the step if names stop matching
+    for p in sorted(content_dir.rglob("*")):
+        if p.is_file() and "Form template" in p.relative_to(content_dir).parts and doc_name.lower() in p.stem.lower():
+            return p
+    return None
+
+
+def screen_document(text: str, step: dict, doc_name: str, template_text: str | None, llm=chat) -> list[dict]:
+    parts = [f"Step: {step['title']}", f"Documents required in this step: {', '.join(step['documents'])}",
+             f"Document being checked: {doc_name}"]
+    if template_text:
+        parts.append(f"Blank form template for it:\n{template_text}")
+    parts.append(f"Uploaded document:\n{text}")
+    items = _json(llm([{"role": "system", "content": SCREEN_PROMPT}, {"role": "user", "content": "\n\n".join(parts)}]))
+    if not isinstance(items, list) or any(not isinstance(i, dict) or i.get("kind") not in KINDS or not isinstance(i.get("text"), str) for i in items):
+        raise ValueError("bad screening result")
+    return [{"kind": i["kind"], "text": i["text"]} for i in items]

@@ -170,3 +170,105 @@ def test_list_types_for_staff_has_approved_and_drafts(env, ai):
     got = s1.get("/api/track/types").json()
     assert {t["status"] for t in got} == {"approved", "draft"}
     assert login("r1").get("/api/track/types").status_code == 403
+
+
+# ---- Task 5: upload and screening ----
+DOC_STEPS = [{"title": "Submit", "documents": ["Form A", "Form B"], "page": 1, "unsure": False},
+             {"title": "Review", "documents": [], "page": 2, "unsure": False}]
+FIND = json.dumps([{"kind": "missing", "text": "Budget empty"}])
+
+
+class CountingLLM:
+    def __init__(self, reply):
+        self.reply, self.n = reply, 0
+
+    def __call__(self, messages):
+        self.n += 1
+        return self.reply
+
+
+@pytest.fixture
+def up(tmp_path, monkeypatch):
+    tk = Tracker(tmp_path / "t.db")
+    monkeypatch.setattr(state, "get_tracker", lambda: tk)
+    monkeypatch.setattr(tracker_api, "UPLOAD_DIR", tmp_path / "uploads")
+    llm = CountingLLM(FIND)
+    monkeypatch.setattr(tracker_api, "llm", llm)
+    v = tk.create_type("CMU", DOC_STEPS, "cmu.pdf")
+    tk.approve(v)
+    sid = tk.create_submission("S", v, ["r1"], "s1")
+    return tk, sid, llm
+
+
+def put(client, sid, doc="Form A", data=None, name="a.pdf"):
+    return client.post(f"/api/track/submissions/{sid}/uploads", data={"doc_name": doc},
+                       files={"file": (name, data if data is not None else pdf_bytes(), "application/pdf")})
+
+
+def test_upload_returns_findings_and_screened(up):
+    _, sid, _ = up
+    r = put(login("r1"), sid)
+    assert r.status_code == 200 and r.json()["status"] == "screened" and r.json()["findings"][0]["kind"] == "missing"
+
+
+def test_scanned_pdf_is_cannot_check_without_llm_call(up):
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page()  # no text layer
+    _, sid, llm = up
+    r = put(login("r1"), sid, data=doc.tobytes())
+    assert r.json()["status"] == "cannot_check" and llm.n == 0
+    assert login("r1").post(f"/api/track/uploads/{r.json()['upload_id']}/send").status_code == 200
+
+
+def test_llm_failure_is_cannot_check_still_sendable(up, monkeypatch):
+    _, sid, _ = up
+    monkeypatch.setattr(tracker_api, "llm", CountingLLM("garbage"))
+    r = put(login("r1"), sid)
+    assert r.json()["status"] == "cannot_check"
+    assert login("r1").post(f"/api/track/uploads/{r.json()['upload_id']}/send").json()["status"] == "sent"
+
+
+def test_send_with_findings_allowed(up):
+    tk, sid, _ = up
+    r = login("r1")
+    uid = put(r, sid).json()["upload_id"]
+    assert r.post(f"/api/track/uploads/{uid}/send").status_code == 200
+    assert tk.get_upload(uid)["status"] == "sent"
+
+
+def test_upload_to_foreign_submission_404(up):
+    _, sid, _ = up
+    assert put(login("r2"), sid).status_code == 404
+
+
+def test_foreign_researcher_cannot_send_someone_elses_upload(up):
+    _, sid, _ = up
+    uid = put(login("r1"), sid).json()["upload_id"]
+    assert login("r2").post(f"/api/track/uploads/{uid}/send").status_code == 404
+
+
+def test_staff_cannot_upload_and_unknown_doc_name_400(up):
+    _, sid, _ = up
+    assert put(login("s1"), sid).status_code == 403
+    assert put(login("r1"), sid, doc="Nope").status_code == 400
+
+
+def test_upload_rejected_when_submission_completed(up):
+    tk, sid, _ = up
+    tk.move_step(sid, "s1", 2)
+    assert put(login("r1"), sid).status_code == 400
+
+
+def test_reupload_replaces_latest_not_history(up):
+    tk, sid, _ = up
+    r = login("r1")
+    put(r, sid)
+    u2 = put(r, sid).json()["upload_id"]
+    assert tk.latest_uploads(sid, 0)["Form A"]["id"] == u2
+
+
+def test_hostile_upload_rejected_and_nothing_written(up, tmp_path):
+    _, sid, _ = up
+    assert put(login("r1"), sid, name="x.exe").status_code == 400
+    assert not (tmp_path / "uploads").exists() or not [p for p in (tmp_path / "uploads").rglob("*") if p.is_file()]

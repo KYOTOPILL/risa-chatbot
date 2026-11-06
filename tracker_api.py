@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 import state
 from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
-from extract import extract_pages
+from extract import extract_pages, extract_text
 from rag import chat as llm
-from steps_ai import draft_steps
+from steps_ai import draft_steps, find_template, screen_document
 
 router = APIRouter(prefix="/api/track")
 
@@ -197,3 +197,49 @@ def approve(vid: int, _: User = Depends(require_staff)):
         raise HTTPException(404, "not found")
     state.get_tracker().approve(vid)
     return {"ok": True}
+
+
+def _own_submission(sid: int, user: User) -> dict:
+    """Researcher's own submission; anything else is a 404."""
+    if user.role != "researcher":
+        raise HTTPException(403, "researchers only")
+    sub = state.get_tracker().get_submission(sid, user.id, "researcher")
+    if sub is None:
+        raise HTTPException(404, "not found")
+    return sub
+
+
+@router.post("/submissions/{sid}/uploads")
+def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), user: User = Depends(current_user)):
+    sub = _own_submission(sid, user)
+    n = sub["current_step"]
+    if n >= sub["step_count"]:
+        raise HTTPException(400, "submission is already complete")
+    step = sub["steps"][n]
+    if doc_name not in step["documents"]:
+        raise HTTPException(400, "not a document of the current step")
+    path = _save_upload(file, f"submissions/{sid}")
+    findings, status = None, "cannot_check"  # a failed check never blocks sending
+    try:
+        text = extract_text(path)
+        if text:
+            tpl = find_template(doc_name)
+            findings = screen_document(text, step, doc_name, extract_text(tpl) if tpl else None, llm=llm)
+            status = "screened"
+    except Exception:  # unreadable file or bad model output: report "cannot check", keep the upload
+        findings, status = None, "cannot_check"
+    uid = state.get_tracker().add_upload(sid, n, doc_name, file.filename or path.name, str(path), findings, status)
+    return {"upload_id": uid, "status": status, "findings": findings or []}
+
+
+@router.post("/uploads/{uid}/send")
+def send_upload(uid: int, user: User = Depends(current_user)):
+    tk = state.get_tracker()
+    up = tk.get_upload(uid)
+    if up is None:
+        raise HTTPException(404, "not found")
+    _own_submission(up["submission_id"], user)
+    if up["status"] not in ("screened", "cannot_check"):
+        raise HTTPException(400, "already sent")
+    tk.set_upload_status(uid, "sent")
+    return {"status": "sent"}

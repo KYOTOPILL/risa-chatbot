@@ -17,7 +17,13 @@ CREATE TABLE IF NOT EXISTS step_events (
     id INTEGER PRIMARY KEY, submission_id INTEGER NOT NULL REFERENCES submissions(id),
     from_step INTEGER NOT NULL, to_step INTEGER NOT NULL, staff_id TEXT NOT NULL,
     at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, note TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS uploads (
+    id INTEGER PRIMARY KEY, submission_id INTEGER NOT NULL REFERENCES submissions(id), step_index INTEGER NOT NULL,
+    doc_name TEXT NOT NULL, filename TEXT NOT NULL, path TEXT NOT NULL, findings TEXT NOT NULL, status TEXT NOT NULL,
+    dismissed TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', reviewed_by TEXT,
+    created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
+UPLOAD_STATUSES = {"screened", "cannot_check", "sent", "approved", "returned"}
 
 
 class Tracker:
@@ -140,3 +146,32 @@ class Tracker:
             db.execute("UPDATE submissions SET current_step = ? WHERE id = ?", (to_step, sid))
             db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
                        (sid, row["current_step"], to_step, staff_id, note))
+
+    # ---- uploads ----
+    def add_upload(self, sid: int, step_index: int, doc_name: str, filename: str, path: str, findings: list | None, status: str) -> int:
+        if status not in UPLOAD_STATUSES:
+            raise ValueError("bad upload status")
+        with self._db() as db:
+            return db.execute("INSERT INTO uploads (submission_id, step_index, doc_name, filename, path, findings, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                              (sid, step_index, doc_name, filename, path, json.dumps(findings or [], ensure_ascii=False), status)).lastrowid
+
+    @staticmethod
+    def _upload(row) -> dict:
+        return {**dict(row), "findings": json.loads(row["findings"]), "dismissed": json.loads(row["dismissed"])}
+
+    def get_upload(self, upload_id: int) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,)).fetchone()
+        return self._upload(row) if row else None
+
+    def set_upload_status(self, upload_id: int, status: str) -> None:
+        if status not in UPLOAD_STATUSES:
+            raise ValueError("bad upload status")
+        with self._db() as db:
+            db.execute("UPDATE uploads SET status = ? WHERE id = ?", (status, upload_id))
+
+    def latest_uploads(self, sid: int, step_index: int) -> dict[str, dict]:
+        """Newest upload per document name for one step; older ones stay as history."""
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM uploads WHERE submission_id = ? AND step_index = ? ORDER BY id", (sid, step_index)).fetchall()
+        return {r["doc_name"]: self._upload(r) for r in rows}

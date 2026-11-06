@@ -113,3 +113,18 @@ def test_list_drafts_returns_only_drafts(tk):
     tk.approve(v1)
     v2 = tk.create_type("B", STEPS, "b.pdf")
     assert [d["id"] for d in tk.list_drafts()] == [v2]
+
+
+# ---- Task 5: uploads ----
+def test_uploads_latest_wins_and_status_changes(sub):
+    tk, sid, _ = sub
+    u1 = tk.add_upload(sid, 0, "Form A", "a.pdf", "/p/a.pdf", [{"kind": "missing", "text": "x"}], "screened")
+    u2 = tk.add_upload(sid, 0, "Form A", "a2.pdf", "/p/a2.pdf", [], "screened")
+    assert tk.latest_uploads(sid, 0)["Form A"]["id"] == u2
+    tk.set_upload_status(u2, "sent")
+    got = tk.get_upload(u2)
+    assert got["status"] == "sent" and got["submission_id"] == sid and got["findings"] == []
+    assert tk.get_upload(u1)["findings"][0]["kind"] == "missing"
+    assert tk.get_upload(999) is None
+    with pytest.raises(ValueError):
+        tk.set_upload_status(u2, "bogus")

@@ -58,3 +58,38 @@ def test_extract_pages_non_pdf_is_single_page(tmp_path):
     p = tmp_path / "a.txt"
     p.write_text("hello")
     assert extract_pages(p) == ["hello"]
+
+
+# ---- Task 5: screening ----
+from steps_ai import find_template, screen_document
+
+STEP = {"title": "Submit", "documents": ["Proposal", "Budget"], "page": 1, "unsure": False}
+FINDINGS = json.dumps([{"kind": "missing", "text": "Budget section empty"}, {"kind": "unclear", "text": "Dates odd"}])
+
+
+def test_screen_parses_findings_and_rejects_bad_kind():
+    got = screen_document("text", STEP, "Proposal", None, llm=FakeLLM(FINDINGS))
+    assert got == [{"kind": "missing", "text": "Budget section empty"}, {"kind": "unclear", "text": "Dates odd"}]
+    assert screen_document("text", STEP, "Proposal", None, llm=FakeLLM("[]")) == []  # clean document is valid
+    for bad in ("nope", '[{"kind": "bad", "text": "x"}]', '[{"kind": "missing"}]', '{"kind": "missing"}'):
+        with pytest.raises(ValueError):
+            screen_document("text", STEP, "Proposal", None, llm=FakeLLM(bad))
+
+
+def test_screen_prompt_includes_step_documents_and_template_when_given():
+    llm = FakeLLM("[]")
+    screen_document("UPLOADED BODY", STEP, "Proposal", "TEMPLATE BODY", llm=llm)
+    sent = " ".join(m["content"] for m in llm.calls[0])
+    assert "Proposal" in sent and "Budget" in sent and "UPLOADED BODY" in sent and "TEMPLATE BODY" in sent
+    llm2 = FakeLLM("[]")
+    screen_document("UPLOADED BODY", STEP, "Proposal", None, llm=llm2)
+    assert "TEMPLATE BODY" not in " ".join(m["content"] for m in llm2.calls[0])
+
+
+def test_find_template_matches_stem_and_returns_none(tmp_path):
+    d = tmp_path / "Form template" / "shareable"
+    d.mkdir(parents=True)
+    (d / "04_Proposal_template.docx").write_bytes(b"x")
+    (tmp_path / "Proposal_elsewhere.docx").write_bytes(b"x")  # not in a Form template folder
+    assert find_template("proposal", tmp_path) == d / "04_Proposal_template.docx"
+    assert find_template("budget", tmp_path) is None
