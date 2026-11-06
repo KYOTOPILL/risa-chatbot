@@ -215,8 +215,25 @@ async function draftEditor(vid) {
         h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); await api("/versions/" + vid + "/approve", { method: "POST" }); tab = "types"; staffHome(); }) }, "อนุมัติและเริ่มใช้งาน"))));
 }
 
+// ---------- chat drawer (researchers) ----------
+// The old chat page, embedded: no chat code is copied and its history keeps working.
+function chatDrawer() {
+  const frame = h("iframe", { class: "chat-frame", title: "แชทผู้ช่วย RiSA" });
+  const panel = h("aside", { class: "chat-drawer", id: "chat-drawer", hidden: true },
+    h("div", { class: "chat-head" }, h("b", {}, "ถาม AI"), h("button", { class: "ghost", type: "button", "aria-label": "ปิดแชท", onclick: () => toggle(false) }, "✕")), frame);
+  const fab = h("button", { class: "primary chat-fab", id: "chat-fab", type: "button", onclick: () => toggle(true) }, "💬 ถาม AI");
+  function toggle(open) {
+    panel.hidden = !open;
+    fab.hidden = open;
+    if (open && !frame.getAttribute("src")) frame.src = "/chat";  // loaded on first open, not at page load
+  }
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && panel.isConnected && !panel.hidden) toggle(false); });
+  document.body.append(fab, panel);
+}
+
 // ---------- start ----------
 async function start() {
+  document.querySelectorAll("#chat-drawer, #chat-fab").forEach((e) => e.remove());
   try { me = await api("/me"); } catch { me = null; }
   const logout = document.getElementById("logout");
   document.getElementById("who").textContent = me ? me.name + " · " + ROLE[me.role] : "";
@@ -225,5 +242,6 @@ async function start() {
   if (!me) return loginScreen().catch(fail);
   users = await api("/mock-users");
   (me.role === "staff" ? staffHome : researcherHome)();
+  if (me.role === "researcher") chatDrawer();
 }
 start();
