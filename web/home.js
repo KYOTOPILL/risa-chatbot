@@ -58,39 +58,45 @@ function findings(list, dismissed = []) {
 }
 
 // ---------- researcher ----------
-async function researcherHome() {
-  const subs = await api("/submissions");
-  show(h("section", { class: "card" }, h("h2", {}, "งานของฉัน"),
-    subs.length ? subs.map((s) => h("div", { class: "list-row" },
-      h("span", {}, s.title, " ", h("span", { class: "muted" }, s.type_name + " · ขั้นที่ " + Math.min(s.current_step + 1, s.step_count) + "/" + s.step_count + (s.current_step >= s.step_count ? " (เสร็จสิ้น)" : ""))),
-      h("button", { class: "ghost", type: "button", onclick: () => researcherDetail(s.id) }, "ดูความคืบหน้า")))
-      : h("p", { class: "muted" }, "ยังไม่มีงานที่เจ้าหน้าที่สร้างให้")));
+function docRow(sub, name, reload) {
+  const up = sub.uploads.find((u) => u.doc_name === name);
+  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    await api("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }));
+    reload();
+  }) });
+  const canSend = up && (up.status === "screened" || up.status === "cannot_check");
+  return h("div", { class: "doc" }, h("b", {}, name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"),
+    up ? findings(up.findings) : null,
+    up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)")) : null,
+    h("div", { class: "row" }, pick,
+      h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"),
+      canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจ") : null));
 }
 
-async function researcherDetail(sid) {
-  const sub = await api("/submissions/" + sid);
+function subCard(sub) {
   const step = sub.steps[sub.current_step];
   const staff = users.find((u) => u.id === sub.staff_id);
-  const docs = step ? step.documents.map((name) => {
-    const up = sub.uploads.find((u) => u.doc_name === name);
-    const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
-      const file = ev.target.files[0];
-      if (!file) return;
-      await api("/submissions/" + sid + "/uploads", form({ doc_name: name, file }));
-      researcherDetail(sid);
-    }) });
-    const canSend = up && (up.status === "screened" || up.status === "cannot_check");
-    return h("div", { class: "doc" }, h("b", {}, name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"),
-      up ? findings(up.findings) : null,
-      up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)")) : null,
-      h("div", { class: "row" }, pick,
-        h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"),
-        canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); researcherDetail(sid); }) }, "ส่งให้เจ้าหน้าที่ตรวจ") : null));
-  }) : [];
-  show(h("button", { class: "ghost", type: "button", onclick: researcherHome }, "← กลับ"),
-    h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · เจ้าหน้าที่ผู้ดูแล: " + (staff ? staff.name : sub.staff_id)), stepper(sub)),
-    step ? h("section", { class: "card" }, h("h2", {}, "เอกสารสำหรับขั้นตอนนี้"), docs.length ? docs : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
-      : h("section", { class: "card" }, h("p", {}, "งานนี้เสร็จสิ้นแล้ว")));
+  return h("section", { class: "card", id: "sub-" + sub.id },
+    h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · เจ้าหน้าที่ผู้ดูแล: " + (staff ? staff.name : sub.staff_id)), stepper(sub),
+    step ? h("div", {}, h("h3", {}, "เอกสารสำหรับขั้นตอนนี้"),
+      step.documents.length ? step.documents.map((name) => docRow(sub, name, researcherHome)) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
+      : h("p", {}, "งานนี้เสร็จสิ้นแล้ว"));
+}
+
+async function researcherHome() {
+  const list = await api("/submissions");
+  const subs = await Promise.all(list.map((s) => api("/submissions/" + s.id)));
+  const todo = todoItems(subs);
+  show(
+    h("section", { class: "card" }, h("h2", {}, "สิ่งที่ต้องทำ"),
+      todo.length ? todo.map((t) => h("div", { class: "todo " + t.kind },
+        h("span", {}, h("b", {}, t.sub.title), " · ", t.doc, " ",
+          t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)")) : h("span", { class: "muted" }, "รอเจ้าหน้าที่ตรวจ")),
+        h("button", { class: "ghost", type: "button", onclick: () => document.getElementById("sub-" + t.sub.id).scrollIntoView({ behavior: "smooth" }) }, "ไปที่งานนี้")))
+        : h("p", { class: "muted" }, "ไม่มีงานค้าง")),
+    subs.length ? subs.map(subCard) : h("section", { class: "card" }, h("p", { class: "muted" }, "ยังไม่มีงานที่เจ้าหน้าที่สร้างให้")));
 }
 
 // ---------- staff ----------

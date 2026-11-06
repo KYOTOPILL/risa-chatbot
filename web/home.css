@@ -17,3 +17,6 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 .err { color: var(--err); }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .checks { display: flex; gap: 14px; flex-wrap: wrap; }
+.todo { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.todo:first-of-type { border-top: 0; }
+.card + .card { margin-top: 14px; }
