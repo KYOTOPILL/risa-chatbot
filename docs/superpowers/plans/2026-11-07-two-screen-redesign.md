@@ -1,5 +1,7 @@
 # Two-Screen Redesign Implementation Plan
 
+> **Historical.** This plan was executed. Later change: the 📁 menu item is now a tab inside the workspace (no `/admin` link) and the file API follows the staff login. See `FRAMEWORK.md` for the current layout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the three tool pages (chat, tracking, admin entry) with one login that opens a researcher home (to-do first, chat drawer) or a staff workspace (review inbox first, left menu).

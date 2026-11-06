@@ -1,5 +1,7 @@
 # Tracking and Document Check Implementation Plan
 
+> **Historical.** This plan was executed. Later changes: `web/track.*` became `web/home.*`; the file manager moved into the staff workspace (📁 tab) and `/admin` was retired. See `FRAMEWORK.md` for the current layout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a researcher/staff dashboard to the RiSA app: per-submission step tracking, AI-drafted step lists per submission type, and a two-stage (AI, then staff) document check.

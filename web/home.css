@@ -1,5 +1,3 @@
-.tabs { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
-.tabs .ghost[aria-current=true] { background: var(--accent); color: var(--accent-ink); }
 .list-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
 .list-row:first-of-type { border-top: 0; }
 .steps { list-style: none; margin: 8px 0 0; padding: 0; }

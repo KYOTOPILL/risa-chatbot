@@ -1,6 +1,6 @@
 # RiSA Redesign: One Login, Researcher Home and Staff Workspace
 
-Status: DRAFT for approval. Mockups: `.superpowers/brainstorm/69331-1793988822/content/researcher-home.html` and `.superpowers/brainstorm/69803-1793988863/content/staff-workspace.html`.
+Status: APPROVED and built. Changed afterwards by the user: the file manager moved into the staff workspace as a tab, `/admin` was retired, and its API follows the staff mock login instead of Basic auth (notes marked "Changed later"). Original text kept for the record. Mockups: `.superpowers/brainstorm/69331-1793988822/content/researcher-home.html` and `.superpowers/brainstorm/69803-1793988863/content/staff-workspace.html`.
 
 ## Intent and why
 
@@ -21,13 +21,13 @@ The problem statement (repetitive inquiries, manual document verification, delay
 - Per-document condition checklists, rule checks, search or filters, "stuck" flags, notifications, staff reassign.
 - LINE. Web only for now.
 - Real CMU login. The mock login stays.
-- Changing the knowledge file manager's login. It keeps HTTP Basic auth (decided by the user: the mock login cookie is forgeable and must not guard file deletion).
+- Changing the knowledge file manager's login. It keeps HTTP Basic auth (decided by the user: the mock login cookie is forgeable and must not guard file deletion). **Changed later:** the user then called the login "just a mockup"; the file manager became the 📁 tab and its API follows the staff mock login, with no password. Real CMU login must come before others can reach the app.
 
 ## Anti-goals (failure even if it works)
 
 - Staff or researchers losing a function they have today.
 - A researcher seeing another researcher's submissions.
-- Anyone reaching the knowledge file manager with only the mock login.
+- Anyone reaching the knowledge file manager with only the mock login. (Changed later: accepted for the mockup, see above.)
 - Updating a step or reviewing a document taking more clicks than today.
 
 ## Decided by the user
@@ -35,13 +35,13 @@ The problem statement (repetitive inquiries, manual document verification, delay
 - **Researcher home = layout B.** Top: a "สิ่งที่ต้องทำ" list. Below: one stepper card per submission. Chat opens from a 💬 button as a drawer, on any researcher page.
 - **Staff workspace = layout A.** Left menu: 📥 รอตรวจ (opens first), 📋 ทุกงาน, 🧩 ประเภททุน, 📁 ไฟล์ความรู้. Row in รอตรวจ shows researcher, submission type, document, AI finding count and a [ตรวจ] button.
 - **Web only; restructure existing pages only.**
-- **Knowledge files keep Basic auth.** The 📁 menu item opens the existing `/admin` page.
+- **Knowledge files keep Basic auth.** The 📁 menu item opens the existing `/admin` page. *Changed later: the 📁 item is a tab that shows the file manager inside the workspace, guarded by the staff login.*
 
 ## My calls (change if wrong)
 
 - To-do list content, in order: returned documents with the staff note and a re-upload action, then documents waiting for staff review. Built from data the tracker API already returns.
 - Chat drawer calls the existing chat endpoint unchanged and behaves as it does today.
-- `/` is the login page, and for a logged-in user it shows their screen. `/track` redirects to `/`. `/admin` stays as the Basic-auth file manager and is linked from the staff menu.
+- `/` is the login page, and for a logged-in user it shows their screen. `/track` redirects to `/`. `/admin` stays as the Basic-auth file manager and is linked from the staff menu. *Changed later: `/admin` redirects to `/`; the file manager is the 📁 tab.*
 - The standalone public chat page stays reachable at `/chat` with no login, so nothing that links to it breaks. It is not part of the new screens.
 - A new researcher with no submissions sees an empty to-do ("ไม่มีงานค้าง") and the chat button.
 - Layout works on a phone screen. Researchers will likely use it from phones, and LINE comes later.
