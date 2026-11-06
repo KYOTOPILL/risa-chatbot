@@ -26,3 +26,14 @@ THAI_MIN_RATIO = 0.5  # ponytail: char-ratio heuristic lets a half-Thai reply th
 
 HR_CONTACT = "ฝ่ายทรัพยากรบุคคล (HR) อีเมล hr@example.com"  # placeholder
 SUPPORTED_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
+
+# Tracking dashboard. ponytail: mock users until CMU email login exists; only tracker_api.current_user should change then
+MOCK_USERS = {
+    "r1": {"name": "Somchai", "role": "researcher"},
+    "r2": {"name": "Nida", "role": "researcher"},
+    "s1": {"name": "Malee", "role": "staff"},
+    "s2": {"name": "Anan", "role": "staff"},
+}
+TRACKER_DB = ROOT / "tracker.db"
+UPLOAD_DIR = ROOT / "uploads"
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
