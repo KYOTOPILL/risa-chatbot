@@ -26,6 +26,17 @@ CREATE TABLE IF NOT EXISTS uploads (
 UPLOAD_STATUSES = {"screened", "cannot_check", "sent", "approved", "returned"}
 
 
+def validate_steps(steps) -> list:
+    """Every step needs a title and a list of document names; anything else would crash upload and review later."""
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("steps must be a non-empty list")
+    for s in steps:
+        if (not isinstance(s, dict) or not isinstance(s.get("title"), str) or not s["title"].strip()
+                or not isinstance(s.get("documents"), list) or not all(isinstance(d, str) and d.strip() for d in s["documents"])):
+            raise ValueError("each step needs a title and a documents list")
+    return steps
+
+
 class Tracker:
     def __init__(self, path: Path):
         self.path = path
@@ -40,11 +51,13 @@ class Tracker:
 
     # ---- types and versions ----
     def create_type(self, name: str, steps: list, source_file: str) -> int:
+        validate_steps(steps)
         with self._db() as db:
             tid = db.execute("INSERT INTO types (name) VALUES (?)", (name,)).lastrowid
             return self._add_version(db, tid, 1, steps, source_file)
 
     def new_version(self, type_id: int, steps: list, source_file: str) -> int:
+        validate_steps(steps)
         with self._db() as db:
             n = db.execute("SELECT COALESCE(MAX(version), 0) FROM versions WHERE type_id = ?", (type_id,)).fetchone()[0]
             return self._add_version(db, type_id, n + 1, steps, source_file)
@@ -55,6 +68,7 @@ class Tracker:
                           (type_id, version, json.dumps(steps, ensure_ascii=False), source_file)).lastrowid
 
     def update_draft(self, version_id: int, steps: list) -> None:
+        validate_steps(steps)
         with self._db() as db:
             n = db.execute("UPDATE versions SET steps = ? WHERE id = ? AND status = 'draft'",
                            (json.dumps(steps, ensure_ascii=False), version_id)).rowcount
@@ -167,6 +181,13 @@ class Tracker:
             row = db.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,)).fetchone()
         return self._upload(row) if row else None
 
+    def send_upload(self, upload_id: int) -> None:
+        """Researcher sends a screened upload to staff. Conditional, so it never overwrites a staff decision."""
+        with self._db() as db:
+            n = db.execute("UPDATE uploads SET status = 'sent' WHERE id = ? AND status IN ('screened', 'cannot_check')", (upload_id,)).rowcount
+        if not n:
+            raise ValueError("upload cannot be sent")
+
     def set_upload_status(self, upload_id: int, status: str) -> None:
         if status not in UPLOAD_STATUSES:
             raise ValueError("bad upload status")
@@ -198,10 +219,24 @@ class Tracker:
         if up["status"] != "sent" or decision not in ("approve", "return"):
             raise ValueError("upload is not waiting for review, or bad decision")
         with self._db() as db:
-            db.execute("UPDATE uploads SET status = ?, dismissed = ?, note = ?, reviewed_by = ? WHERE id = ?",
-                       ("approved" if decision == "approve" else "returned", json.dumps(dismissed), note, staff_id, upload_id))
+            n = db.execute("UPDATE uploads SET status = ?, dismissed = ?, note = ?, reviewed_by = ? WHERE id = ? AND status = 'sent'",
+                           ("approved" if decision == "approve" else "returned", json.dumps(dismissed), note, staff_id, upload_id)).rowcount
+        if not n:
+            raise ValueError("upload is not waiting for review")
         if decision != "approve":
             return False
+        steps = json.loads(row["steps"])
+        docs = steps[up["step_index"]]["documents"] if up["step_index"] < len(steps) else []
+        latest = self.latest_uploads(up["submission_id"], up["step_index"])
+        if up["step_index"] == row["current_step"] and docs and all(latest.get(d, {}).get("status") == "approved" for d in docs):
+            cur = row["current_step"]
+            with self._db() as db:  # only the request that still sees the old step advances it, so no double move or duplicate event
+                moved = db.execute("UPDATE submissions SET current_step = ? WHERE id = ? AND current_step = ?", (cur + 1, up["submission_id"], cur)).rowcount
+                if moved:
+                    db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
+                               (up["submission_id"], cur, cur + 1, staff_id, "auto: all documents approved"))
+            return bool(moved)
+        return False
         steps = json.loads(row["steps"])
         docs = steps[up["step_index"]]["documents"] if up["step_index"] < len(steps) else []
         latest = self.latest_uploads(up["submission_id"], up["step_index"])

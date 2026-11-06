@@ -145,9 +145,14 @@ def _save_upload(file: UploadFile, subdir: str) -> Path:
 
 def _draft(path: Path) -> list[dict]:
     try:
-        return draft_steps(extract_pages(path), llm=llm)
+        pages = extract_pages(path)
+        if not any(pages):
+            raise ValueError("document has no text (scanned PDF?)")
+        return draft_steps(pages, llm=llm)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    except Exception:  # corrupt or unreadable file
+        raise HTTPException(422, "cannot read this document")
 
 
 @router.get("/types")
@@ -225,6 +230,8 @@ def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), us
     step = sub["steps"][n]
     if doc_name not in step["documents"]:
         raise HTTPException(400, "not a document of the current step")
+    if any(u["doc_name"] == doc_name and u["status"] in ("sent", "approved") for u in sub["uploads"]):
+        raise HTTPException(400, "document is already with staff or approved")
     path = _save_upload(file, f"submissions/{sid}")
     findings, status = None, "cannot_check"  # a failed check never blocks sending
     try:
@@ -246,9 +253,10 @@ def send_upload(uid: int, user: User = Depends(current_user)):
     if up is None:
         raise HTTPException(404, "not found")
     _own_submission(up["submission_id"], user)
-    if up["status"] not in ("screened", "cannot_check"):
-        raise HTTPException(400, "already sent")
-    tk.set_upload_status(uid, "sent")
+    try:
+        tk.send_upload(uid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"status": "sent"}
 
 

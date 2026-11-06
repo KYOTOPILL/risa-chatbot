@@ -209,3 +209,42 @@ def test_review_queue_lists_only_sent(docs):
     tk.add_upload(sid, 0, "Form B", "b.pdf", "/p/b.pdf", [], "screened")
     q = tk.review_queue()
     assert [x["id"] for x in q] == [u] and q[0]["submission_title"] == "S" and q[0]["staff_id"] == "s1"
+
+
+# ---- Final review fixes ----
+@pytest.mark.parametrize("bad", [[], [{"title": ""}], [{"title": "a"}], [{"title": "a", "documents": "x"}],
+                                 [{"title": "a", "documents": [""]}], "nope", [5]])
+def test_malformed_steps_rejected_everywhere(tk, bad):
+    with pytest.raises(ValueError):
+        tk.create_type("X", bad, "x.pdf")
+    v = tk.create_type("Y", STEPS, "y.pdf")
+    with pytest.raises(ValueError):
+        tk.update_draft(v, bad)
+    with pytest.raises(ValueError):
+        tk.new_version(tk.get_version(v)["type_id"], bad, "z.pdf")
+
+
+def test_send_upload_only_from_screened_or_cannot_check(sub):
+    tk, sid, _ = sub
+    u = tk.add_upload(sid, 0, "Form A", "a.pdf", "/p", [], "screened")
+    tk.send_upload(u)
+    assert tk.get_upload(u)["status"] == "sent"
+    for status in ("sent", "approved", "returned"):
+        tk.set_upload_status(u, status)
+        with pytest.raises(ValueError):
+            tk.send_upload(u)  # never overwrites a staff decision
+
+
+def test_stale_approval_does_not_log_a_second_advance(docs):
+    tk, sid, sent = docs
+    a, b = sent("Form A"), sent("Form B")
+    tk.review_upload(a, "s1", "approve", [], "")
+    real = tk.latest_uploads
+
+    def racing(sid_, step):  # another request advances the submission just before ours does
+        tk.latest_uploads = real
+        tk.move_step(sid_, "s1", 1, "other request")
+        return real(sid_, step)
+    tk.latest_uploads = racing
+    assert tk.review_upload(b, "s1", "approve", [], "") is False
+    assert [e["to_step"] for e in tk.get_submission(sid, "s1", "staff")["events"]] == [1]

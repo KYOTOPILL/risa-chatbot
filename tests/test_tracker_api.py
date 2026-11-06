@@ -332,3 +332,45 @@ def test_track_page_and_assets_served():
     r = c.get("/track")
     assert r.status_code == 200 and "track.js" in r.text
     assert c.get("/static/track.js").status_code == 200 and c.get("/static/track.css").status_code == 200
+
+
+# ---- Final review fixes ----
+def test_corrupt_type_document_is_422_and_leaves_no_file(env, ai):
+    r = post_type(login("s1"), data=b"%PDF-1.4 this is not a pdf")
+    assert r.status_code == 422
+    assert not [p for p in ai.rglob("*") if p.is_file()]
+
+
+def test_scanned_type_document_is_422_without_llm_call(env, ai, monkeypatch):
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page()
+    calls = CountingLLM(GOOD)
+    monkeypatch.setattr(tracker_api, "llm", calls)
+    assert post_type(login("s1"), data=doc.tobytes()).status_code == 422 and calls.n == 0
+
+
+def test_malformed_steps_put_is_400(env, ai):
+    s1 = login("s1")
+    vid = post_type(s1).json()["version_id"]
+    for bad in ([], [{"title": "x"}], [{"documents": []}]):
+        assert s1.put(f"/api/track/versions/{vid}", json={"steps": bad}).status_code == 400
+
+
+def test_reupload_blocked_while_sent_or_approved(up):
+    tk, sid, _ = up
+    r = login("r1")
+    uid = put(r, sid).json()["upload_id"]
+    r.post(f"/api/track/uploads/{uid}/send")
+    assert put(r, sid).status_code == 400  # under staff review
+    review(login("s1"), uid)
+    assert put(r, sid).status_code == 400  # approved: cannot be silently replaced
+    assert tk.latest_uploads(sid, 0)["Form A"]["id"] == uid
+
+
+def test_send_twice_is_400(up):
+    _, sid, _ = up
+    r = login("r1")
+    uid = put(r, sid).json()["upload_id"]
+    assert r.post(f"/api/track/uploads/{uid}/send").status_code == 200
+    assert r.post(f"/api/track/uploads/{uid}/send").status_code == 400
