@@ -70,6 +70,11 @@ class Tracker:
             row = db.execute(self._VERSION_SQL + " WHERE v.id = ?", (version_id,)).fetchone()
         return self._version(row) if row else None
 
+    def list_drafts(self) -> list[dict]:
+        with self._db() as db:
+            rows = db.execute(self._VERSION_SQL + " WHERE v.status = 'draft' ORDER BY v.id").fetchall()
+        return [self._version(r) for r in rows]
+
     def list_types(self) -> list[dict]:
         """Newest approved version of each type."""
         with self._db() as db:

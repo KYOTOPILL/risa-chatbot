@@ -111,3 +111,11 @@ def extract_text(path: Path) -> str:
         text = path.read_text(encoding="utf-8", errors="replace")
     text = clean_thai(text.replace("\x00", ""))
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def extract_pages(path: Path) -> list[str]:
+    """One string per PDF page, so callers can cite pages; other types come back as a single page."""
+    if path.suffix.lower() != ".pdf":
+        return [extract_text(path)]
+    with pymupdf.open(path) as doc:
+        return [clean_thai(page.get_text().replace("\x00", "")).strip() for page in doc]

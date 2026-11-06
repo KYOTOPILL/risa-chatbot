@@ -84,3 +84,89 @@ def test_move_works_and_out_of_range_400(env):
 def test_mock_users_lists_everyone_with_roles():
     got = TestClient(server.app).get("/api/track/mock-users").json()
     assert {"id": "s1", "name": "Malee", "role": "staff"} in got
+
+
+# ---- Task 4: AI-drafted type steps ----
+import json
+
+import tracker_api
+
+GOOD = json.dumps([{"title": "Submit", "documents": ["Form A"], "page": 1, "unsure": False}])
+
+
+@pytest.fixture
+def ai(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(tracker_api, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(tracker_api, "llm", lambda messages: GOOD)
+    return tmp_path / "uploads"
+
+
+def pdf_bytes(text="hello scholarship"):
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), text)
+    return doc.tobytes()
+
+
+def post_type(client, name="New", filename="doc.pdf", data=None):
+    return client.post("/api/track/types", data={"name": name}, files={"file": (filename, data or pdf_bytes(), "application/pdf")})
+
+
+def test_upload_type_creates_draft_not_live(env, ai):
+    tk, _, _ = env
+    r = post_type(login("s1"))
+    assert r.status_code == 200 and r.json()["steps"][0]["title"] == "Submit"
+    assert tk.get_version(r.json()["version_id"])["status"] == "draft"
+    assert "New" not in [t["type_name"] for t in tk.list_types()]
+
+
+def test_bad_draft_saves_nothing_422(env, ai, monkeypatch):
+    tk, _, _ = env
+    monkeypatch.setattr(tracker_api, "llm", lambda messages: "not json")
+    assert post_type(login("s1")).status_code == 422
+    assert tk.list_drafts() == []
+
+
+def test_researcher_cannot_draft_403(env, ai):
+    assert post_type(login("r1")).status_code == 403
+
+
+def test_hostile_filename_stays_inside_upload_dir(env, ai):
+    assert post_type(login("s1"), filename="../../evil.pdf").status_code == 200
+    saved = [p for p in ai.rglob("*") if p.is_file()]
+    assert len(saved) == 1 and saved[0].resolve().is_relative_to(ai.resolve())
+
+
+def test_oversize_and_wrong_ext_rejected(env, ai, monkeypatch):
+    monkeypatch.setattr(tracker_api, "MAX_UPLOAD_BYTES", 100)
+    s1 = login("s1")
+    assert post_type(s1, data=b"x" * 101).status_code == 413
+    assert post_type(s1, filename="evil.exe").status_code == 400
+    assert not ai.exists() or not [p for p in ai.rglob("*") if p.is_file()]
+
+
+def test_edit_redraft_and_approve_a_draft(env, ai, monkeypatch):
+    tk, _, _ = env
+    s1 = login("s1")
+    vid = post_type(s1).json()["version_id"]
+    new = [{"title": "Edited", "documents": [], "page": None, "unsure": False}]
+    assert s1.put(f"/api/track/versions/{vid}", json={"steps": new}).status_code == 200
+    assert tk.get_version(vid)["steps"][0]["title"] == "Edited"
+    assert s1.post(f"/api/track/versions/{vid}/redraft").json()["steps"][0]["title"] == "Submit"
+    assert s1.post(f"/api/track/versions/{vid}/approve").status_code == 200
+    assert s1.put(f"/api/track/versions/{vid}", json={"steps": new}).status_code == 400  # approved: frozen
+
+
+def test_new_version_of_existing_type(env, ai):
+    tk, v, _ = env
+    tid = tk.get_version(v)["type_id"]
+    r = login("s1").post(f"/api/track/types/{tid}/versions", files={"file": ("n.pdf", pdf_bytes(), "application/pdf")})
+    assert r.status_code == 200 and tk.get_version(r.json()["version_id"])["version"] == 2
+
+
+def test_list_types_for_staff_has_approved_and_drafts(env, ai):
+    s1 = login("s1")
+    post_type(s1)
+    got = s1.get("/api/track/types").json()
+    assert {t["status"] for t in got} == {"approved", "draft"}
+    assert login("r1").get("/api/track/types").status_code == 403

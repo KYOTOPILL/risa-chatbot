@@ -1,11 +1,18 @@
 """Tracking dashboard API: mock login, submissions, step moves. Rules live in tracker.py; this only maps users and HTTP."""
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+import re
+import secrets
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
 import state
-from config import MOCK_USERS
+from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
+from extract import extract_pages
+from rag import chat as llm
+from steps_ai import draft_steps
 
 router = APIRouter(prefix="/api/track")
 
@@ -40,6 +47,10 @@ class SubmissionIn(BaseModel):
     version_id: int
     researcher_ids: list[str]
     staff_id: str
+
+
+class StepsIn(BaseModel):
+    steps: list[dict]
 
 
 class MoveIn(BaseModel):
@@ -104,4 +115,85 @@ def move(sid: int, body: MoveIn, user: User = Depends(require_staff)):
         raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+UPLOAD_EXTS = {".pdf", ".docx"}
+
+
+def _save_upload(file: UploadFile, subdir: str) -> Path:
+    """Checks type and size, then stores under UPLOAD_DIR/subdir with a sanitized, unique name."""
+    name = re.sub(r"[^\w.\-]", "_", Path(file.filename or "").name)  # drops any directory part
+    if Path(name).suffix.lower() not in UPLOAD_EXTS:
+        raise HTTPException(400, "only .pdf and .docx files are accepted")
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "file too large")
+    dest = UPLOAD_DIR / subdir
+    dest.mkdir(parents=True, exist_ok=True)
+    path = dest / f"{secrets.token_hex(4)}_{name}"
+    path.write_bytes(data)
+    return path
+
+
+def _draft(path: Path) -> list[dict]:
+    try:
+        return draft_steps(extract_pages(path), llm=llm)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.get("/types")
+def types(_: User = Depends(require_staff)):
+    tk = state.get_tracker()
+    return tk.list_types() + tk.list_drafts()
+
+
+@router.post("/types")
+def create_type(name: str = Form(...), file: UploadFile = File(...), _: User = Depends(require_staff)):
+    path = _save_upload(file, "types")
+    try:
+        steps = _draft(path)
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
+    return {"version_id": state.get_tracker().create_type(name, steps, str(path)), "steps": steps}
+
+
+@router.post("/types/{type_id}/versions")
+def new_version(type_id: int, file: UploadFile = File(...), _: User = Depends(require_staff)):
+    path = _save_upload(file, "types")
+    try:
+        steps = _draft(path)
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
+    return {"version_id": state.get_tracker().new_version(type_id, steps, str(path)), "steps": steps}
+
+
+@router.put("/versions/{vid}")
+def edit_version(vid: int, body: StepsIn, _: User = Depends(require_staff)):
+    try:
+        state.get_tracker().update_draft(vid, body.steps)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@router.post("/versions/{vid}/redraft")
+def redraft(vid: int, _: User = Depends(require_staff)):
+    tk = state.get_tracker()
+    v = tk.get_version(vid)
+    if not v or v["status"] != "draft":
+        raise HTTPException(400, "not an editable draft")
+    steps = _draft(Path(v["source_file"]))
+    tk.update_draft(vid, steps)
+    return {"steps": steps}
+
+
+@router.post("/versions/{vid}/approve")
+def approve(vid: int, _: User = Depends(require_staff)):
+    if not state.get_tracker().get_version(vid):
+        raise HTTPException(404, "not found")
+    state.get_tracker().approve(vid)
     return {"ok": True}

@@ -106,3 +106,10 @@ def test_in_flight_submission_keeps_its_version(sub):
     v2 = tk.new_version(tk.get_version(v)["type_id"], STEPS, "cmu2.pdf")
     tk.approve(v2)
     assert len(tk.get_submission(sid, "s1", "staff")["steps"]) == 3
+
+
+def test_list_drafts_returns_only_drafts(tk):
+    v1 = tk.create_type("A", STEPS, "a.pdf")
+    tk.approve(v1)
+    v2 = tk.create_type("B", STEPS, "b.pdf")
+    assert [d["id"] for d in tk.list_drafts()] == [v2]
