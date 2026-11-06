@@ -6,3 +6,5 @@ index/
 .DS_Store
 graphify-out/
 .env
+tracker.db
+uploads/
