@@ -20,3 +20,8 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 .todo { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .todo:first-of-type { border-top: 0; }
 .card + .card { margin-top: 14px; }
+.ws { display: grid; grid-template-columns: 200px 1fr; gap: 18px; align-items: start; margin-top: 18px; }
+.ws-menu { display: flex; flex-direction: column; gap: 8px; }
+.ws-menu .ghost { text-align: left; text-decoration: none; }
+.ws-menu .ghost[aria-current=true] { background: var(--accent); color: var(--accent-ink); }
+@media (max-width: 700px) { .ws { grid-template-columns: 1fr; } .ws-menu { flex-direction: row; flex-wrap: wrap; } }
