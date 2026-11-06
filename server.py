@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 from typing_extensions import Annotated
@@ -144,13 +144,18 @@ def download(doc_id: str):
 
 
 @app.get("/")
-def index():
+def home():
+    return FileResponse(WEB / "home.html")
+
+
+@app.get("/chat")
+def chat_page():
     return FileResponse(WEB / "index.html")
 
 
 @app.get("/track")
 def track():
-    return FileResponse(WEB / "track.html")
+    return RedirectResponse("/")
 
 
 app.mount("/static", RevalidatingStatic(directory=WEB), name="static")

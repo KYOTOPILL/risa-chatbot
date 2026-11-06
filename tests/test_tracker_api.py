@@ -329,9 +329,9 @@ def test_uploaded_file_download_is_limited_to_staff_and_owners(up):
 # ---- Task 7: page ----
 def test_track_page_and_assets_served():
     c = TestClient(server.app)
-    r = c.get("/track")
-    assert r.status_code == 200 and "track.js" in r.text
-    assert c.get("/static/track.js").status_code == 200 and c.get("/static/track.css").status_code == 200
+    r = c.get("/")
+    assert r.status_code == 200 and "home.js" in r.text
+    assert c.get("/static/home.js").status_code == 200 and c.get("/static/home.css").status_code == 200
 
 
 # ---- Final review fixes ----

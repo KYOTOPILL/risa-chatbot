@@ -139,13 +139,30 @@ def test_download_route_rejects_path_like_ids(client):
 
 
 def test_index_page_served_in_thai(client):
-    r = client.get("/")
+    r = client.get("/chat")
     assert r.status_code == 200 and "RiSA" in r.text and 'lang="th"' in r.text
+
+
+def test_root_serves_the_home_page(client):
+    r = client.get("/")
+    assert r.status_code == 200 and 'lang="th"' in r.text and "home.js" in r.text
+
+
+def test_chat_page_is_public_and_frameable(client):
+    r = client.get("/chat")
+    assert r.status_code == 200 and "app.js" in r.text
+    assert "x-frame-options" not in r.headers  # the researcher drawer embeds this page
+
+
+def test_track_redirects_to_root_without_a_loop(client):
+    r = client.get("/track", follow_redirects=False)
+    assert r.status_code in (307, 308) and r.headers["location"] == "/"
+    assert client.get("/").status_code == 200
 
 
 def test_icons_script_served_and_linked(client):
     assert "function fileIcon" in client.get("/static/icons.js").text
-    assert "icons.js" in client.get("/").text
+    assert "icons.js" in client.get("/chat").text
 
 
 def test_repeated_question_without_history_is_answered_from_cache(client):
