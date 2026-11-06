@@ -1,21 +1,5 @@
-<!doctype html>
-<html lang="th">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>RiSA จัดการเอกสาร</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="stylesheet" href="/static/admin.css">
-<script type="speculationrules">{"prerender":[{"urls":["/"]}]}</script>
-</head>
-<body>
-<div class="adm">
-  <header class="top">
-    <div class="brand"><span class="mark">RiSA</span><span class="sub">จัดการเอกสาร</span></div>
-    <a class="ghost" href="/">กลับหน้าหลัก</a>
-  </header>
-
-  <section class="card drive" id="list">
+<!-- Markup of the 📁 tab. Our own static file: home.js inserts it with innerHTML once. -->
+<section class="card drive" id="list">
     <div class="between">
       <nav id="crumbs" class="crumbs" aria-label="โฟลเดอร์"></nav>
       <div class="tools">
@@ -48,7 +32,6 @@
     </div>
     <p id="empty" class="empty hidden">ยังไม่มีเอกสาร ลากไฟล์มาวางที่นี่เพื่ออัปโหลด</p>
   </section>
-</div>
 
 <div id="toast" class="toast hidden" role="status"><span id="tmsg"></span><button id="undo" class="link" type="button">เลิกทำ</button></div>
 
@@ -73,7 +56,3 @@
     </menu>
   </form>
 </dialog>
-<script src="/static/icons.js"></script>
-<script src="/static/admin.js"></script>
-</body>
-</html>

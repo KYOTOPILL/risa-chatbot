@@ -1,50 +1,33 @@
-"""Admin page for managing the content folder. Set ADMIN_PASSWORD to enable login (user: admin); unset = loopback only."""
-import os
+"""File management API for the staff workspace (the 📁 tab). Guarded by the staff mock login, so it is only as safe as that login."""
 import re
-import secrets
 import shutil
 import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 import state
-from config import CONTENT_DIR, ROOT, SUPPORTED_EXTS
+from config import CONTENT_DIR, SUPPORTED_EXTS
 from docmeta import SHAREABLE, doc_meta
 from ingest import build_index, summarize
 from store import display_summary
+from tracker_api import User, current_user
 
 MAX_BYTES = 25 * 1024 * 1024
-ADMIN_USER = "admin"
-LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 BAD_CATEGORY = re.compile(r"[/\\\x00-\x1f]")
 REINDEX_DELAY = 2.5  # seconds of quiet after the last change before the index rebuilds
 
 
-basic = HTTPBasic(auto_error=False)
-
-
-def require_admin(request: Request, creds: HTTPBasicCredentials | None = Depends(basic)) -> None:
+def require_admin(request: Request, user: User = Depends(current_user)) -> None:
     host = request.headers.get("host", "")
-    origin = request.headers.get("origin")  # browsers send it on cross-site form posts, which carry cached Basic creds
+    origin = request.headers.get("origin")  # browsers send it on cross-site form posts, which carry the cookie
     if request.method not in ("GET", "HEAD", "OPTIONS") and origin and urlsplit(origin).netloc != host:
         raise HTTPException(403, "cross-site request blocked")
-    password = os.environ.get("ADMIN_PASSWORD")
-    if not password:  # no password set: loopback only, as before
-        if not request.client or request.client.host not in LOCAL_HOSTS or urlsplit("//" + host).hostname not in LOCAL_HOSTS:
-            raise HTTPException(403, "admin is only available on the server machine")  # Host check stops DNS rebinding
-        return
-    # ponytail: one shared login, no lockout or rate limit; add both before exposing beyond a trusted LAN
-    ok = creds is not None and all(
-        secrets.compare_digest(got.encode(), want.encode())
-        for got, want in ((creds.username, ADMIN_USER), (creds.password, password))
-    )
-    if not ok:
-        raise HTTPException(401, "login required", headers={"WWW-Authenticate": 'Basic realm="admin"'})
+    # ponytail: the mock login has no password, so anyone who can reach the site can become staff; real CMU login replaces current_user
+    if user.role != "staff":
+        raise HTTPException(403, "staff only")
 
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -114,11 +97,6 @@ def _write(dst: Path, data: bytes) -> None:
     tmp = dst.parent / f".{dst.name}.part"
     tmp.write_bytes(data)
     tmp.replace(dst)  # same-name write replaces the old file
-
-
-@router.get("/admin")
-def page():
-    return FileResponse(ROOT / "web" / "admin.html")
 
 
 @router.get("/api/admin/files")

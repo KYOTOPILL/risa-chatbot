@@ -31,23 +31,20 @@ def up(client, name="a.txt", data=b"annual leave ten days", category="policy", d
     )
 
 
-def test_non_local_client_is_blocked_without_password(monkeypatch):
-    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
-    server.app.dependency_overrides.clear()
-    c = TestClient(server.app)  # client host is "testclient", not loopback
-    for r in (c.get("/admin"), c.get("/api/admin/files"), c.post("/api/admin/reindex")):
-        assert r.status_code == 403
-
-
-def test_password_required_when_set(monkeypatch):
-    monkeypatch.setenv("ADMIN_PASSWORD", "s3cret")
+def test_file_api_needs_a_staff_login(monkeypatch):
     server.app.dependency_overrides.clear()
     c = TestClient(server.app)
-    for r in (c.get("/api/admin/files"), c.get("/api/admin/files", auth=("admin", "wrong")),
-              c.get("/api/admin/files", auth=("root", "s3cret")), c.post("/api/admin/reindex")):
-        assert r.status_code == 401 and r.headers["www-authenticate"].startswith("Basic")
-    assert c.get("/api/admin/files", auth=("admin", "s3cret")).status_code == 200
-    assert c.get("/admin", auth=("admin", "s3cret")).status_code == 200
+    routes = lambda: (c.get("/api/admin/files"), c.post("/api/admin/reindex"))
+    assert [r.status_code for r in routes()] == [401, 401]  # not logged in
+    c.post("/api/track/login", json={"user_id": "r1"})
+    assert [r.status_code for r in routes()] == [403, 403]  # a researcher is not staff
+    c.post("/api/track/login", json={"user_id": "s1"})
+    assert c.get("/api/admin/files").status_code == 200
+
+
+def test_old_admin_page_redirects_home():
+    r = TestClient(server.app).get("/admin", follow_redirects=False)
+    assert r.status_code in (307, 308) and r.headers["location"] == "/"
 
 
 def test_upload_lands_in_category_folder_and_lists(env):
@@ -182,10 +179,10 @@ def test_file_that_was_never_downloadable_still_gets_a_description(env):
     assert c.get("/api/admin/files").json()[0]["summary"] == "นโยบายภายใน"
 
 
-def test_admin_page_served(env):
+def test_files_fragment_served_for_the_workspace(env):
     _, _, c = env
-    r = c.get("/admin")
-    assert r.status_code == 200 and "จัดการเอกสาร" in r.text
+    r = c.get("/static/files.html")
+    assert r.status_code == 200 and 'id="rows"' in r.text
 
 
 def test_mkdir_and_folders_listing(env):
@@ -258,15 +255,11 @@ def test_delete_folder_removes_contents_only_that_folder(env):
     assert content.exists() and (content / "forms" / "a.txt").exists()
 
 
-def test_cross_site_post_and_rebinding_are_blocked(monkeypatch):
+def test_cross_site_post_is_blocked_for_staff():
     server.app.dependency_overrides.clear()
-    monkeypatch.setenv("ADMIN_PASSWORD", "s3cret")
     c = TestClient(server.app)
-    r = c.post("/api/admin/reindex", auth=("admin", "s3cret"), headers={"Origin": "https://evil.example"})
+    c.post("/api/track/login", json={"user_id": "s1"})
+    r = c.post("/api/admin/reindex", headers={"Origin": "https://evil.example"})
     assert r.status_code == 403 and "cross-site" in r.text
-    r = c.get("/api/admin/folders", auth=("admin", "s3cret"), headers={"Origin": "https://evil.example"})
+    r = c.get("/api/admin/folders", headers={"Origin": "https://evil.example"})
     assert r.status_code == 200  # reads are not Origin-checked; browsers block cross-site reads
-    monkeypatch.delenv("ADMIN_PASSWORD")
-    local = TestClient(server.app, client=("127.0.0.1", 5000), base_url="http://localhost")
-    assert local.get("/api/admin/folders").status_code == 200
-    assert local.get("/api/admin/folders", headers={"Host": "evil.example"}).status_code == 403

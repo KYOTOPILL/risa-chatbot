@@ -1,5 +1,5 @@
 #!/bin/sh
-# One command to start RiSA: ./run.sh   (chat http://localhost:8000, admin http://localhost:8000/admin)
+# One command to start RiSA: ./run.sh   (app http://localhost:8000, chat http://localhost:8000/chat)
 cd "$(dirname "$0")"
 curl -s localhost:11434 >/dev/null || { ollama serve >/tmp/ollama.log 2>&1 & sleep 3; }  # embeddings need Ollama
 ollama list | grep -q bge-m3 || ollama pull bge-m3

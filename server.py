@@ -154,7 +154,8 @@ def chat_page():
 
 
 @app.get("/track")
-def track():
+@app.get("/admin")  # the file manager now lives in the staff workspace
+def moved():
     return RedirectResponse("/")
 
 

@@ -101,14 +101,27 @@ async function researcherHome() {
 
 // ---------- staff ----------
 let tab = "queue";
+let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
 async function staffHome() {
+  if (filesRoot) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const queue = await api("/review-queue").catch((e) => { fail(e); return []; });
-  const items = [["queue", "📥 รอตรวจ (" + queue.length + ")"], ["subs", "📋 ทุกงาน"], ["types", "🧩 ประเภททุน"]];
+  const items = [["queue", "📥 รอตรวจ (" + queue.length + ")"], ["subs", "📋 ทุกงาน"], ["types", "🧩 ประเภททุน"], ["files", "📁 ไฟล์ความรู้"]];
   const body = h("div", { class: "ws-main" });
-  const menu = h("nav", { class: "ws-menu" }, items.map(([id, label]) => h("button", { class: "ghost", type: "button", "aria-current": String(id === tab), onclick: () => { tab = id; staffHome(); } }, label)),
-    h("a", { class: "ghost", href: "/admin", target: "_blank", rel: "noopener" }, "📁 ไฟล์ความรู้"));  // file manager keeps its own Basic-auth password
+  const menu = h("nav", { class: "ws-menu" }, items.map(([id, label]) => h("button", { class: "ghost", type: "button", "aria-current": String(id === tab), onclick: () => { tab = id; staffHome(); } }, label)));
   show(h("div", { class: "ws" }, menu, body));
-  ({ subs: staffSubs, queue: (b) => staffQueue(b, queue), types: staffTypes })[tab](body).catch(fail);
+  ({ subs: staffSubs, queue: (b) => staffQueue(b, queue), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
+}
+
+async function staffFiles(body) {
+  if (!filesRoot) {
+    filesRoot = h("div", { id: "files-root" });
+    filesRoot.innerHTML = await (await fetch("/static/files.html")).text();  // our own static markup, never API data
+    document.body.append(filesRoot);  // in the page before mounting: files.js looks its elements up by id
+    filesTab = mountFiles();
+  }
+  filesRoot.hidden = false;
+  body.append(filesRoot);
+  filesTab.open();
 }
 
 async function staffSubs(body) {
@@ -129,7 +142,7 @@ async function staffSubs(body) {
           const ids = [...body.querySelectorAll(".checks input:checked")].map((c) => c.value);
           await api("/submissions", send("POST", { title: title.value.trim(), version_id: +type.value, researcher_ids: ids, staff_id: staffSel.value }));
           staffHome();
-        }) }, "สร้างงาน")) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (แท็บ ประเภทงานและขั้นตอน)")));
+        }) }, "สร้างงาน")) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภททุน)")));
 }
 
 async function staffDetail(sid) {

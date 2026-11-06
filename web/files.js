@@ -1,3 +1,6 @@
+// File manager for the staff workspace. mountFiles() runs once, after files.html is in the page, and returns {open, close}.
+// Wrapped in a function so its names cannot clash with home.js.
+function mountFiles() {
 const $ = (id) => document.getElementById(id);
 const SHARE = "shareable", ROOT_LABEL = "เอกสารทั้งหมด";
 let files = [], folders = [], cwd = "", selected = new Set(), dragging = [];
@@ -319,5 +322,9 @@ $("mv").addEventListener("close", () => { if ($("mv").returnValue === "ok") move
 window.addEventListener("beforeunload", (e) => { if (pending) e.preventDefault(); });
 
 try { const c = JSON.parse(sessionStorage.getItem(CACHE)); if (c) apply(...c); } catch (_) {}  // show last list while the fresh one loads
-load().catch((e) => say(e.message, true));
-refresh();
+
+return {
+  open() { load().catch((e) => say(e.message, true)); refresh(); },
+  close() { clearTimeout(poll); },
+};
+}
