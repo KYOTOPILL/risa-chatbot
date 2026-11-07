@@ -70,7 +70,7 @@ function docRow(sub, name, reload) {
   return h("div", { class: "doc" }, h("b", {}, name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"),
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)")) : null,
-    h("div", { class: "row" }, pick,
+    h("div", { class: "actions" }, pick,
       h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"),
       canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจ") : null));
 }
@@ -151,7 +151,7 @@ async function staffDetail(sid) {
   const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); staffDetail(sid); });
   show(h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"),
     h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · ผู้ดูแล " + sub.staff_id + " · นักวิจัย " + sub.researcher_ids.join(", ")), stepper(sub),
-      h("div", { class: "row" },
+      h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
         h("button", { class: "primary", type: "button", disabled: !mine || sub.current_step >= sub.step_count, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
         mine ? null : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้ดูแลเท่านั้นที่แก้ไขได้"))),
@@ -171,7 +171,7 @@ async function staffQueue(body, q) {
     return h("div", { class: "doc" }, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, u.submission_title + " · ผู้ดูแล " + u.staff_id + " · " + (u.findings.length ? "AI พบ " + u.findings.length + " ข้อ" : "AI ไม่พบข้อสังเกต (หรือตรวจไม่ได้)")), " ",
       h("a", { href: "/api/track/uploads/" + u.id + "/file", target: "_blank" }, "เปิดไฟล์ " + u.filename),
       list, note,
-      h("div", { class: "row" },
+      h("div", { class: "actions" },
         h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
         h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
         mine ? null : h("span", { class: "muted" }, "เฉพาะผู้ดูแลเท่านั้น")));
@@ -188,7 +188,7 @@ async function staffTypes(body) {
     draftEditor(out.version_id);
   }) });
   body.append(
-    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดเอกสารของทุน แล้ว AI จะร่างขั้นตอนให้ตรวจก่อนใช้งานจริง"), name, h("div", { class: "row" }, pick,
+    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดเอกสารของทุน แล้ว AI จะร่างขั้นตอนให้ตรวจก่อนใช้งานจริง"), name, h("div", { class: "actions" }, pick,
       h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารและให้ AI ร่างขั้นตอน"))),
     h("section", { class: "card" }, h("h2", {}, "ประเภทงานทั้งหมด"), types.map((t) => h("div", { class: "list-row" },
       h("span", {}, t.type_name, " v" + t.version, " ", h("span", { class: "muted" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : "ใช้งานอยู่ · " + t.steps.length + " ขั้นตอน")),
@@ -222,7 +222,7 @@ async function draftEditor(vid) {
   show(h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"),
     h("section", { class: "card" }, h("h2", {}, v.type_name + " v" + v.version + " (ฉบับร่าง)"),
       h("p", { class: "muted" }, "ยังไม่ใช้งานจริงจนกว่าจะกดอนุมัติ"), box,
-      h("div", { class: "row" },
+      h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", onclick: () => { steps.push({ title: "", documents: [], page: null, unsure: false }); draw(); } }, "+ เพิ่มขั้นตอน"),
         h("button", { class: "ghost", type: "button", onclick: act(async () => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) { await api("/versions/" + vid + "/redraft", { method: "POST" }); draftEditor(vid); } }) }, "ให้ AI ร่างใหม่"),
         h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); await api("/versions/" + vid + "/approve", { method: "POST" }); tab = "types"; staffHome(); }) }, "อนุมัติและเริ่มใช้งาน"))));

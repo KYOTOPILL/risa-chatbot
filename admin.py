@@ -13,21 +13,19 @@ from config import CONTENT_DIR, SUPPORTED_EXTS
 from docmeta import SHAREABLE, doc_meta
 from ingest import build_index, summarize
 from store import display_summary
-from tracker_api import User, current_user
+from auth import require_staff
 
 MAX_BYTES = 25 * 1024 * 1024
 BAD_CATEGORY = re.compile(r"[/\\\x00-\x1f]")
 REINDEX_DELAY = 2.5  # seconds of quiet after the last change before the index rebuilds
 
 
-def require_admin(request: Request, user: User = Depends(current_user)) -> None:
+def require_admin(request: Request, _staff=Depends(require_staff)) -> None:
     host = request.headers.get("host", "")
     origin = request.headers.get("origin")  # browsers send it on cross-site form posts, which carry the cookie
     if request.method not in ("GET", "HEAD", "OPTIONS") and origin and urlsplit(origin).netloc != host:
         raise HTTPException(403, "cross-site request blocked")
-    # ponytail: the mock login has no password, so anyone who can reach the site can become staff; real CMU login replaces current_user
-    if user.role != "staff":
-        raise HTTPException(403, "staff only")
+    # ponytail: the mock login has no password, so anyone who can reach the site can become staff; real CMU login replaces auth.current_user
 
 
 router = APIRouter(dependencies=[Depends(require_admin)])

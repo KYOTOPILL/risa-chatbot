@@ -1,42 +1,20 @@
 """Tracking dashboard API: mock login, submissions, step moves. Rules live in tracker.py; this only maps users and HTTP."""
-from dataclasses import dataclass
-
 import re
 import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import state
+from auth import User, current_user, require_staff
 from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
 from extract import extract_pages, extract_text
 from rag import chat as llm
 from steps_ai import draft_steps, find_template, screen_document
 
 router = APIRouter(prefix="/api/track")
-
-
-@dataclass
-class User:
-    id: str
-    name: str
-    role: str
-
-
-def current_user(request: Request) -> User:
-    # ponytail: plain uid cookie, anyone can forge it; replaced by CMU email login before real use
-    uid = request.cookies.get("uid")
-    if uid not in MOCK_USERS:
-        raise HTTPException(401, "login required")
-    return User(uid, **MOCK_USERS[uid])
-
-
-def require_staff(user: User = Depends(current_user)) -> User:
-    if user.role != "staff":
-        raise HTTPException(403, "staff only")
-    return user
 
 
 class LoginIn(BaseModel):
