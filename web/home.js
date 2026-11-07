@@ -91,8 +91,20 @@ function subCard(sub) {
       : h("p", {}, "งานนี้เสร็จสิ้นแล้ว"));
 }
 
+function openPosts(posts) {
+  if (!posts.length) return null;
+  return h("section", { class: "card" }, h("h2", {}, "งานที่เปิดรับ"), h("p", { class: "muted" }, "เลือกงานที่ต้องการส่ง ระบบจะสร้างงานของคุณเอง"),
+    posts.map((p) => h("div", { class: "list-row" },
+      h("span", {}, h("b", {}, p.type_name), " ", h("span", { class: "muted" }, p.steps.length + " ขั้นตอน · เอกสาร: " + ([...new Set(p.steps.flatMap((s) => s.documents))].join(", ") || "ไม่มี") + " · ผู้ดูแล " + p.owner_name)),
+      h("button", { class: "primary", type: "button", onclick: act(async () => {
+        const out = await api("/open-types/" + p.type_id + "/start", { method: "POST" });
+        await researcherHome();
+        document.getElementById("sub-" + out.id)?.scrollIntoView({ behavior: "smooth" });
+      }) }, "เริ่มส่ง"))));
+}
+
 async function researcherHome() {
-  const list = await api("/submissions");
+  const [list, posts] = await Promise.all([api("/submissions"), api("/open-types")]);
   const subs = await Promise.all(list.map((s) => api("/submissions/" + s.id)));
   const todo = todoItems(subs);
   show(
@@ -102,7 +114,8 @@ async function researcherHome() {
           t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)")) : h("span", { class: "muted" }, "รอเจ้าหน้าที่ตรวจ")),
         h("button", { class: "ghost", type: "button", onclick: () => document.getElementById("sub-" + t.sub.id).scrollIntoView({ behavior: "smooth" }) }, "ไปที่งานนี้")))
         : h("p", { class: "muted" }, "ไม่มีงานค้าง")),
-    subs.length ? subs.map(subCard) : h("section", { class: "card" }, h("p", { class: "muted" }, "ยังไม่มีงานที่เจ้าหน้าที่สร้างให้")));
+    openPosts(posts),
+    subs.length ? subs.map(subCard) : h("section", { class: "card" }, h("p", { class: "muted" }, posts.length ? "ยังไม่มีงานของคุณ เริ่มจาก “งานที่เปิดรับ” ด้านบน" : "ยังไม่มีงาน และยังไม่มีงานที่เปิดรับ")));
 }
 
 // ---------- staff ----------
@@ -202,7 +215,7 @@ async function staffTypes(body) {
     h("section", { class: "card" }, h("h2", {}, "ประเภทงานทั้งหมด"), types.map((t) => h("div", { class: "list-row" },
       h("span", {}, t.type_name, " v" + t.version, " ", h("span", { class: "muted" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : "ใช้งานอยู่ · " + t.steps.length + " ขั้นตอน")),
       t.status === "draft" ? h("button", { class: "ghost", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจและอนุมัติ")
-        : h("span", { class: "tools" }, h("button", { class: "ghost", type: "button", onclick: act(() => formsManager(t)) }, "แบบฟอร์ม"), newVersionButton(t))))));
+        : h("span", { class: "tools" }, postControls(t), h("button", { class: "ghost", type: "button", onclick: act(() => formsManager(t)) }, "แบบฟอร์ม"), newVersionButton(t))))));
 }
 
 // ---------- blank forms: AI drafts, staff edit and approve, researchers download only approved ones ----------
@@ -260,6 +273,17 @@ function formEditor(t, f) {
         h("button", { class: "ghost", type: "button", onclick: () => { fields.push({ label: "", hint: "" }); draw(); } }, "+ เพิ่มช่อง"),
         h("button", { class: "ghost", type: "button", onclick: save(false) }, "บันทึก"),
         f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: save(true) }, "บันทึกและอนุมัติ") : null)));
+}
+
+// open a type as a post researchers can start from; the owner is staff in charge of every request started from it
+function postControls(t) {
+  const staff = users.filter((u) => u.role === "staff");
+  const publish = (owner) => api("/types/" + t.type_id + "/publish", send("POST", owner ? { owner_id: owner } : {}));
+  const owner = h("select", { class: "field", "aria-label": "ผู้ดูแลงานนี้", onchange: act(async (ev) => { await publish(ev.target.value); staffHome(); }) },
+    staff.map((u) => h("option", { value: u.id, selected: u.id === t.owner_id }, "ผู้ดูแล " + u.name)));
+  return t.open
+    ? h("span", { class: "tools" }, h("span", { class: "badge ok" }, "เปิดรับ"), owner, h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/close", { method: "POST" }); staffHome(); }) }, "ปิดรับ"))
+    : h("button", { class: "ghost", type: "button", onclick: act(async () => { await publish(); staffHome(); }) }, "เปิดรับ");
 }
 
 function newVersionButton(t) {

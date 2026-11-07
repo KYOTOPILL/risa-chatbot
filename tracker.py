@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS types (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS types (id INTEGER PRIMARY KEY, name TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 0, owner_id TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS versions (
     id INTEGER PRIMARY KEY, type_id INTEGER NOT NULL REFERENCES types(id), version INTEGER NOT NULL,
     status TEXT NOT NULL, steps TEXT NOT NULL, source_file TEXT NOT NULL);
@@ -55,6 +55,10 @@ class Tracker:
         self.path = path
         with self._db() as db:
             db.executescript(SCHEMA)
+            have = {r["name"] for r in db.execute("PRAGMA table_info(types)")}
+            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
+                if col not in have:
+                    db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
 
     def _db(self) -> sqlite3.Connection:  # one connection per call, so request threads never share one
         db = sqlite3.connect(self.path)
@@ -92,7 +96,7 @@ class Tracker:
         with self._db() as db:
             db.execute("UPDATE versions SET status = 'approved' WHERE id = ?", (version_id,))
 
-    _VERSION_SQL = "SELECT v.*, t.name AS type_name FROM versions v JOIN types t ON t.id = v.type_id"
+    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id FROM versions v JOIN types t ON t.id = v.type_id"
 
     @staticmethod
     def _version(row) -> dict:
@@ -139,6 +143,17 @@ class Tracker:
     def approve_form(self, type_id: int, doc_name: str) -> bool:
         with self._db() as db:
             return db.execute("UPDATE forms SET status = 'approved' WHERE type_id = ? AND doc_name = ?", (type_id, doc_name)).rowcount > 0
+
+    # ---- posts: an open type is listed for researchers, who start their own request; the owner is staff in charge of those ----
+    def set_type_open(self, type_id: int, is_open: bool, owner_id: str | None = None) -> None:
+        with self._db() as db:
+            if owner_id is None:
+                db.execute("UPDATE types SET open = ? WHERE id = ?", (int(is_open), type_id))
+            else:
+                db.execute("UPDATE types SET open = ?, owner_id = ? WHERE id = ?", (int(is_open), owner_id, type_id))
+
+    def list_open_types(self) -> list[dict]:
+        return [v for v in self.list_types() if v["open"]]
 
     # ---- submissions ----
     def create_submission(self, title: str, version_id: int, researcher_ids: list[str], staff_id: str) -> int:

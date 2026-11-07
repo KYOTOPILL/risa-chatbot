@@ -156,6 +156,50 @@ def create_type(name: str = Form(...), file: UploadFile = File(...), _: User = D
     return {"version_id": state.get_tracker().create_type(name, steps, str(path)), "steps": steps}
 
 
+class PublishIn(BaseModel):
+    owner_id: str | None = None
+
+
+@router.post("/types/{type_id}/publish")
+def publish(type_id: int, body: PublishIn, user: User = Depends(require_staff)):
+    """Open a type for researchers. The owner (default: whoever publishes) is staff in charge of every request started from it."""
+    tk = state.get_tracker()
+    owner = body.owner_id or user.id
+    if owner not in MOCK_USERS or MOCK_USERS[owner]["role"] != "staff":
+        raise HTTPException(400, "the owner must be a staff member")
+    if not any(v["type_id"] == type_id for v in tk.list_types()):
+        if any(v["type_id"] == type_id for v in tk.list_drafts()):
+            raise HTTPException(400, "approve the type first")
+        raise HTTPException(404, "no such type")
+    tk.set_type_open(type_id, True, owner)
+    return {"ok": True, "owner_id": owner}
+
+
+@router.post("/types/{type_id}/close")
+def close(type_id: int, _: User = Depends(require_staff)):
+    state.get_tracker().set_type_open(type_id, False)
+    return {"ok": True}
+
+
+@router.get("/open-types")
+def open_types(_: User = Depends(current_user)):
+    return [{"type_id": v["type_id"], "type_name": v["type_name"], "owner_id": v["owner_id"], "owner_name": MOCK_USERS.get(v["owner_id"], {}).get("name", ""),
+             "steps": [{"title": st["title"], "documents": st["documents"]} for st in v["steps"]]} for v in state.get_tracker().list_open_types()]
+
+
+@router.post("/open-types/{type_id}/start")
+def start_request(type_id: int, user: User = Depends(current_user)):
+    if user.role != "researcher":
+        raise HTTPException(403, "researchers only")
+    tk = state.get_tracker()
+    v = next((v for v in tk.list_open_types() if v["type_id"] == type_id), None)
+    if v is None:
+        raise HTTPException(404, "this post is not open")
+    n = sum(1 for s in tk.list_submissions(user.id, "researcher") if s["type_name"] == v["type_name"])
+    title = f"{v['type_name']} - {user.name}" + (f" #{n + 1}" if n else "")
+    return {"id": tk.create_submission(title, v["id"], [user.id], v["owner_id"])}
+
+
 @router.post("/types/{type_id}/versions")
 def new_version(type_id: int, file: UploadFile = File(...), _: User = Depends(require_staff)):
     path = _save_upload(file, "types")
