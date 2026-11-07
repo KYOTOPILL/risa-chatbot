@@ -107,8 +107,19 @@ function stepper(sub) {
   }));
 }
 
+// one finding: a small label, the field it is about, one sentence, and what to do. `lead` is an optional leading element (a checkbox).
+function findingItem(f, dismissed = false, lead = null) {
+  return h("div", { class: "finding " + f.kind + (dismissed ? " dismissed" : "") }, lead,
+    h("span", { class: "fbody" }, h("span", { class: "fhead" }, h("span", { class: "fk" }, KIND[f.kind] || f.kind), f.field ? h("b", {}, f.field) : null),
+      h("span", { class: "ft" }, f.text), f.fix ? h("span", { class: "fx" }, "แนะนำ: " + f.fix) : null));
+}
+
+// the AI's findings: a one-line count by kind, then each finding
 function findings(list, dismissed = []) {
-  return list.map((f, i) => h("div", { class: "finding " + f.kind + (dismissed.includes(i) ? " dismissed" : "") }, h("b", {}, KIND[f.kind] || f.kind), " · ", f.text));
+  if (!list.length) return null;
+  const n = (k) => list.filter((f) => f.kind === k).length;
+  const parts = ["missing", "incorrect", "unclear"].filter(n).map((k) => KIND[k] + " " + n(k));
+  return h("div", { class: "findings" }, h("p", { class: "fsum" }, "AI พบ " + list.length + " ข้อสังเกต · " + parts.join(" · ")), list.map((f, i) => findingItem(f, dismissed.includes(i))));
 }
 
 // ---------- researcher ----------
@@ -298,12 +309,12 @@ async function staffDetail(sid) {
 function reviewBlock(u, mine, after) {
   const dismissed = new Set();
   const note = h("input", { type: "text", placeholder: "หมายเหตุถึงนักวิจัย (ไม่บังคับ)" });
-  const list = h("div");
-  const draw = () => list.replaceChildren(...u.findings.map((f, i) => h("label", { class: "finding " + f.kind + (dismissed.has(i) ? " dismissed" : ""), style: "display:block" },
-    h("input", { type: "checkbox", checked: dismissed.has(i), onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }), " ", h("b", {}, KIND[f.kind]), " · ", f.text, " ", h("span", { class: "muted" }, "(ติ๊ก = ปัดตก)"))));
+  const list = h("div", { class: "findings" });
+  const draw = () => list.replaceChildren(...u.findings.map((f, i) => findingItem(f, dismissed.has(i),
+    h("input", { type: "checkbox", checked: dismissed.has(i), "aria-label": "ปัดตก", onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }))));
   draw();
   const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); after(); });
-  return [list, note, h("div", { class: "actions" },
+  return [u.findings.length ? h("p", { class: "fsum" }, "ข้อสังเกตจาก AI " + u.findings.length + " ข้อ · ติ๊กข้อที่ไม่ต้องสนใจเพื่อปัดตก") : null, list, note, h("div", { class: "actions" },
     h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
     h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
     mine ? null : h("span", { class: "muted" }, "เฉพาะผู้รับผิดชอบเท่านั้น"))];

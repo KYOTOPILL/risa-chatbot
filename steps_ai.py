@@ -43,10 +43,12 @@ def draft_steps(pages: list[str], llm=chat) -> list[dict]:
 
 
 SCREEN_PROMPT = (
-    "You check a document an applicant uploaded for a scholarship or funding step. Find problems: "
+    "You check a document an applicant uploaded for a scholarship or funding step. Find real problems: "
     '"missing" (required information absent), "incorrect" (contradicts itself or looks wrong), "unclear" (ambiguous). '
-    'Answer with a JSON array only: [{"kind": "missing"|"incorrect"|"unclear", "text": short description}]. '
-    "Answer [] if there are no problems. Write descriptions in the document's own language."
+    'Answer with a JSON array only: [{"kind": "missing"|"incorrect"|"unclear", "field": the name of the one field or section concerned (short, optional), '
+    '"text": ONE sentence, at most 120 characters, saying what is wrong, "fix": what the applicant should do, at most 80 characters (optional)}]. '
+    "One finding per problem: do not list several fields in one finding, and merge findings that say the same thing. At most 8 findings, most important first. "
+    "Do not repeat the field name inside the text. Answer [] if there are no problems. Write in the document's own language."
 )
 KINDS = {"missing", "incorrect", "unclear"}
 
@@ -68,4 +70,6 @@ def screen_document(text: str, step: dict, doc_name: str, template_text: str | N
     items = _json(llm([{"role": "system", "content": SCREEN_PROMPT}, {"role": "user", "content": "\n\n".join(parts)}]))
     if not isinstance(items, list) or any(not isinstance(i, dict) or i.get("kind") not in KINDS or not isinstance(i.get("text"), str) for i in items):
         raise ValueError("bad screening result")
-    return [{"kind": i["kind"], "text": i["text"]} for i in items]
+    order = {"missing": 0, "incorrect": 1, "unclear": 2}
+    out = [{"kind": i["kind"], "text": i["text"].strip(), **{k: i[k].strip() for k in ("field", "fix") if isinstance(i.get(k), str) and i[k].strip()}} for i in items]
+    return sorted(out, key=lambda f: order[f["kind"]])[:8]  # sorted is stable: the model's own order holds within a kind

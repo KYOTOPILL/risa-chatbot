@@ -114,9 +114,19 @@ dialog p { margin: 0; }
 .steps .done { color: var(--muted); }
 .steps .now { font-weight: 700; color: var(--accent); }
 .steps .next { opacity: .55; }
-.finding { padding: 8px 12px; margin: 6px 0; background: var(--warn-bg); color: var(--warn); border-radius: 6px; }
-.finding.missing { background: var(--err-bg); color: var(--err); }
+.findings { margin: 10px 0; }
+.fsum { margin: 0 0 8px; font-size: .88rem; color: var(--muted); }
+.finding { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; margin: 6px 0; border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; background: var(--panel, #fff); color: var(--text); font-size: .94rem; line-height: 1.55; }
+.finding.missing { border-left-color: var(--err); }
+.finding.unclear { border-left-color: var(--muted); }
 .finding.dismissed { opacity: .5; text-decoration: line-through; }
+.finding input[type=checkbox] { margin-top: 4px; flex: none; }
+.fbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fhead { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.fk { font-size: .74rem; padding: 0 8px; border-radius: 9999px; background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+.finding.missing .fk { background: var(--err-bg); color: var(--err); }
+.finding.unclear .fk { background: var(--tint, rgba(0,0,0,.05)); color: var(--muted); }
+.fx { color: var(--muted); font-size: .88rem; }
 .doc { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 10px; }
 .doc.unsure, .stepedit.unsure { border-color: var(--warn); background: var(--warn-bg); }
 .stepedit { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 10px; display: grid; gap: 8px; }

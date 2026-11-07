@@ -93,3 +93,12 @@ def test_find_template_matches_stem_and_returns_none(tmp_path):
     (tmp_path / "Proposal_elsewhere.docx").write_bytes(b"x")  # not in a Form template folder
     assert find_template("proposal", tmp_path) == d / "04_Proposal_template.docx"
     assert find_template("budget", tmp_path) is None
+
+
+def test_screen_keeps_field_and_fix_sorts_by_kind_and_caps_at_eight():
+    import json
+    from steps_ai import screen_document
+    items = [{"kind": "unclear", "text": " vague "}, {"kind": "missing", "field": "Budget", "text": "absent", "fix": "add it"}] + [{"kind": "incorrect", "text": f"x{i}"} for i in range(9)]
+    out = screen_document("t", {"title": "S", "documents": ["D"]}, "D", None, llm=lambda m: json.dumps(items))
+    assert len(out) == 8 and out[0] == {"kind": "missing", "text": "absent", "field": "Budget", "fix": "add it"}
+    assert [f["kind"] for f in out].count("unclear") == 0 and "field" not in out[1]  # 8 kept: missing first, then incorrect; unclear fell off the cap
