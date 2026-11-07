@@ -241,3 +241,34 @@ def test_attachment_may_be_a_photo_but_not_an_executable(env):
     llm.reply = "[]"
     assert fill(client("r1"), sid, files={"f5": ("scan.jpg", b"\xff\xd8\xff", "image/jpeg")}).status_code == 200
     assert fill(client("r1"), sid, files={"f5": ("x.exe", b"MZ", "application/octet-stream")}).status_code == 400
+
+
+def test_progress_lines_stream_status_then_done_and_plain_json_is_unchanged(env):
+    _, sid, tid, llm = env
+    publish_form(tid)
+    llm.reply = "[]"
+    r1 = client("r1")
+    r = r1.post(f"/api/track/submissions/{sid}/forms", headers={"accept": "application/x-ndjson"},
+                data={"doc_name": "Travel claim", "answers": json.dumps({"f1": "a", "f2": "5", "f3": "2026-01-01", "f4": "Economy"}), "file_keys": ["f5"]},
+                files=[("files", ("r.pdf", b"%PDF-1.4", "application/pdf"))])
+    lines = [json.loads(l) for l in r.text.splitlines()]
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    assert [next(iter(l)) for l in lines] == ["status", "status", "done"] and "5 ช่อง" in lines[0]["status"] and lines[-1]["done"]["status"] == "screened"
+    plain = fill(r1, sid)  # no Accept header: the same JSON as before
+    assert plain.status_code == 200 and plain.json()["status"] == "screened"
+
+
+def test_progress_error_comes_as_an_error_line_and_validation_stays_a_plain_400(env):
+    _, _, tid, _ = env
+    s1 = client("s1")
+    s1.post(f"/api/track/types/{tid}/forms/approve", json={"doc_name": "Travel claim"})  # nothing drafted: plain 404 before streaming
+    import tracker_api as t
+    old = t.llm
+    t.llm = lambda m: "garbage"
+    try:
+        r = s1.post(f"/api/track/types/{tid}/forms/draft", headers={"accept": "application/x-ndjson"}, json={"doc_name": "Travel claim"})
+    finally:
+        t.llm = old
+    lines = [json.loads(l) for l in r.text.splitlines()]
+    assert lines[-1].keys() == {"error"} and "could not draft" in lines[-1]["error"]
+    assert s1.get(f"/api/track/types/{tid}/forms").json() == []

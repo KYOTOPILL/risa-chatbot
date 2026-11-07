@@ -21,6 +21,55 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : "ผิดพลาด (" + r.status + ")");
   return body;
 }
+// Slow AI steps: the server reports what it is doing; the panel lists each step as it happens, with the seconds the current one has taken.
+async function apiStream(path, opts, onStatus) {
+  const r = await fetch("/api/track" + path, { ...opts, headers: { ...(opts.headers || {}), accept: "application/x-ndjson" } });
+  if (!r.ok || !r.body) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(typeof body.detail === "string" ? body.detail : "ผิดพลาด (" + r.status + ")");
+  }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", out = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    buf += dec.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buf.split("\n");
+    buf = lines.pop();
+    for (const l of done ? [...lines, buf] : lines) {
+      if (!l.trim()) continue;
+      const ev = JSON.parse(l);
+      if (ev.status) onStatus(ev.status);
+      else if (ev.error) throw new Error(ev.error);
+      else if ("done" in ev) out = ev.done;
+    }
+    if (done) return out;
+  }
+}
+
+// start(say) does the work and calls say(text) for each step. The panel replaces the card that was clicked; on failure it shows the error and a retry.
+async function runProgress(from, title, start, onDone, retry) {
+  const host = from.closest(".card, .doc") || from;
+  const list = h("ol", { class: "prog-steps" }), t0 = { v: Date.now() };
+  let cur = null, timer = null;
+  const tick = () => { if (cur) cur.lastChild.textContent = " " + Math.round((Date.now() - t0.v) / 1000) + " วินาที"; };
+  const say = (text) => {
+    if (cur) { cur.className = "done"; cur.lastChild.remove(); }
+    cur = h("li", { class: "now" }, h("span", { class: "spin" }), h("span", {}, text), h("span", { class: "muted" }, ""));
+    list.append(cur); t0.v = Date.now();
+  };
+  say("เริ่มทำงาน");
+  host.replaceChildren(h("h2", {}, title), h("p", { class: "muted sub" }, "AI กำลังทำงานอยู่ ขั้นตอนที่ทำเสร็จแล้วจะขึ้นเครื่องหมายถูก กรุณารอสักครู่"), list);
+  timer = setInterval(tick, 1000);
+  try {
+    const out = await start(say);
+    clearInterval(timer);
+    await onDone(out);
+  } catch (e) {
+    clearInterval(timer);
+    cur?.classList.replace("now", "failed");
+    host.append(h("p", { class: "err" }, "ไม่สำเร็จ: " + e.message), h("div", { class: "actions" }, h("button", { class: "ghost", type: "button", onclick: retry }, "กลับ")));
+  }
+}
 const send = (method, body) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const form = (fields) => { const f = new FormData(); for (const [k, v] of Object.entries(fields)) f.append(k, v); return { method: "POST", body: f }; };
 
@@ -67,12 +116,11 @@ function docRow(sub, name, reload) {
   const up = sub.uploads.find((u) => u.doc_name === name), def = sub.forms[name];
   const canSend = up && (up.status === "screened" || up.status === "cannot_check");
   const locked = up && (up.status === "sent" || up.status === "approved");
-  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
+  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
-    await api("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }));
-    reload();
-  }) });
+    runProgress(ev.target, "กำลังตรวจสอบ “" + name + "”", (say) => apiStream("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }), say), reload, reload);
+  } });
   const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจสอบ") : null;
   return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"),
     up ? findings(up.findings) : null,
@@ -217,12 +265,11 @@ async function staffTypes(body) {
   const open = openType && types.find((t) => t.type_id === openType);
   if (open) return typePage(body, open);
   const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง, ขออนุมัติจริยธรรมการวิจัย" });
-  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
+  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
-    const out = await api("/types", form({ name: name.value.trim() || file.name, file }));
-    draftEditor(out.version_id);
-  }) });
+    runProgress(ev.target, "AI กำลังร่างขั้นตอนจาก “" + file.name + "”", (say) => apiStream("/types", form({ name: name.value.trim() || file.name, file }), say), (out) => draftEditor(out.version_id), staffHome);
+  } });
   const counts = Object.fromEntries(await Promise.all(types.filter((t) => t.status === "approved").map(async (t) => {
     const by = await formsByDoc(t), docs = docsOf(t);
     return [t.id, docs.length ? "แบบฟอร์มพร้อมใช้งาน " + docs.filter((d) => by[d]?.status === "approved").length + "/" + docs.length : "ไม่มีเอกสาร"];
@@ -260,12 +307,11 @@ function postControls(t) {
 }
 
 function newVersionButton(t) {
-  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
+  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
-    const out = await api("/types/" + t.type_id + "/versions", form({ file }));
-    draftEditor(out.version_id);
-  }) });
+    runProgress(ev.target, "AI กำลังร่างขั้นตอนเวอร์ชันใหม่จาก “" + file.name + "”", (say) => apiStream("/types/" + t.type_id + "/versions", form({ file }), say), (out) => draftEditor(out.version_id), staffHome);
+  } });
   return h("span", {}, pick, h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, "อัปโหลดเวอร์ชันใหม่"));
 }
 
@@ -288,7 +334,7 @@ async function draftEditor(vid) {
       h("p", { class: "muted" }, "ยังไม่ใช้งานจริงจนกว่าจะกดอนุมัติ"), box,
       h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", onclick: () => { steps.push({ title: "", documents: [], page: null, unsure: false }); draw(); } }, "+ เพิ่มขั้นตอน"),
-        h("button", { class: "ghost", type: "button", onclick: act(async () => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) { await api("/versions/" + vid + "/redraft", { method: "POST" }); draftEditor(vid); } }) }, "ให้ AI ร่างใหม่"),
+        h("button", { class: "ghost", type: "button", onclick: (ev) => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) runProgress(ev.target, "AI กำลังร่างขั้นตอนใหม่", (say) => apiStream("/versions/" + vid + "/redraft", { method: "POST" }, say), () => draftEditor(vid), () => draftEditor(vid)); } }, "ให้ AI ร่างใหม่"),
         h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); await api("/versions/" + vid + "/approve", { method: "POST" }); tab = "types"; staffHome(); }) }, "อนุมัติและเริ่มใช้งาน"))));
 }
 

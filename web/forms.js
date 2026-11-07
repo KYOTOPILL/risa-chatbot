@@ -22,16 +22,17 @@ function fieldInput(f, value, readOnly = false) {
 function formFill(sub, name, def, up, reload) {
   const old = Object.fromEntries((up?.answers || []).map((a) => [a.key, a.value]));
   const inputs = def.fields.map((f) => fieldInput(f, old[f.key]));
-  const save = act(async (ev) => {
+  const save = (ev) => {
+    const missing = def.fields.findIndex((f, i) => f.required && (f.type === "file" ? !inputs[i].get() && !old[f.key] : !String(inputs[i].get()).trim()));
+    if (missing >= 0) { alert("กรุณากรอก: " + def.fields[missing].label); return; }  // before the progress panel: it would replace the form and lose what was typed
     const fd = new FormData(), answers = {};
     def.fields.forEach((f, i) => {
       const v = inputs[i].get();
       if (f.type === "file") { if (v) { fd.append("file_keys", f.key); fd.append("files", v); } } else answers[f.key] = v;
     });
     fd.append("doc_name", name); fd.append("answers", JSON.stringify(answers));
-    ev.target.disabled = true; ev.target.textContent = "AI กำลังตรวจสอบ…";
-    try { await api("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }); } finally { reload(); }
-  });
+    runProgress(ev.target, "กำลังบันทึกและตรวจสอบ “" + def.title + "”", (say) => apiStream("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }, say), reload, reload);
+  };
   return h("div", { class: "fillform" }, inputs, h("div", { class: "actions end" }, h("button", { class: "primary", type: "button", onclick: save }, up ? "บันทึกใหม่และให้ AI ตรวจสอบ" : "บันทึกและให้ AI ตรวจสอบ")));
 }
 
@@ -50,13 +51,11 @@ async function formsSection(t) {
   const row = (doc, f) => h("div", { class: "list-row" },
     h("span", { class: "grow" }, h("b", {}, doc), h("span", { class: "muted block" }, FORM_STATUS(f) + (f ? " · " + f.fields.length + " ช่อง" : ""))),
     h("span", { class: "tools" },
-      h("button", { class: f ? "ghost" : "primary", type: "button", onclick: act(async (ev) => {
+      h("button", { class: f ? "ghost" : "primary", type: "button", onclick: (ev) => {
         if (f && !confirm("ให้ AI ร่างใหม่? ฟอร์มเดิมของเอกสารนี้จะถูกแทนที่")) return;
-        ev.target.disabled = true; ev.target.textContent = "AI กำลังสร้าง…";
-        let out;
-        try { out = await api("/types/" + t.type_id + "/forms/draft", send("POST", { doc_name: doc })); } catch (e) { staffHome(); throw e; }
-        formEditor(t, { ...out, doc_name: doc });
-      }) }, f ? "ให้ AI ร่างใหม่" : "ให้ AI สร้างฟอร์ม"),
+        runProgress(ev.target, "AI กำลังสร้างฟอร์ม “" + doc + "”", (say) => apiStream("/types/" + t.type_id + "/forms/draft", send("POST", { doc_name: doc }), say),
+          (out) => formEditor(t, { ...out, doc_name: doc }), staffHome);
+      } }, f ? "ให้ AI ร่างใหม่" : "ให้ AI สร้างฟอร์ม"),
       f ? h("button", { class: "ghost", type: "button", onclick: () => formEditor(t, f) }, "แก้ไข") : null,
       f && f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/forms/approve", send("POST", { doc_name: doc })); staffHome(); }) }, "อนุมัติ") : null));
   return h("section", { class: "card" }, h("h2", {}, "แบบฟอร์ม"),

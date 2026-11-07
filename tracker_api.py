@@ -1,11 +1,13 @@
 """Tracking dashboard API: mock login, submissions, step moves. Rules live in tracker.py; this only maps users and HTTP."""
 import json
+import queue
 import re
 import secrets
+import threading
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 import state
@@ -131,12 +133,43 @@ def _save_upload(file: UploadFile, subdir: str, exts=None) -> Path:
     return path
 
 
-def _draft(path: Path) -> list[dict]:
+def _progress(request: Request, work):
+    """Runs work(say). A client that sends `Accept: application/x-ndjson` gets JSON lines while it runs: {"status": text} for each thing the server is doing,
+    then {"done": result} or {"error": text}. Anyone else gets the plain JSON result, so scripts and tests are unchanged."""
+    if "application/x-ndjson" not in request.headers.get("accept", ""):
+        return work(lambda text: None)
+    q: queue.Queue = queue.Queue()
+
+    def run():
+        try:
+            q.put(("done", work(lambda text: q.put(("status", text)))))
+        except HTTPException as e:
+            q.put(("error", e.detail if isinstance(e.detail, str) else "ผิดพลาด"))
+        except Exception:
+            q.put(("error", "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์ กรุณาลองใหม่"))
+
+    def events():
+        threading.Thread(target=run, daemon=True).start()
+        while True:
+            kind, val = q.get()
+            yield json.dumps({kind: val}, ensure_ascii=False) + "\n"
+            if kind != "status":
+                return
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={"X-Accel-Buffering": "no"})
+
+
+def _draft(path: Path, say=lambda text: None) -> list[dict]:
     try:
+        say("กำลังอ่านข้อความจากเอกสาร")
         pages = extract_pages(path)
         if not any(pages):
             raise ValueError("document has no text (scanned PDF?)")
-        return draft_steps(pages, llm=llm)
+        say(f"อ่านแล้ว {len(pages)} หน้า ({sum(len(p) for p in pages):,} ตัวอักษร) กำลังให้ AI ร่างขั้นตอนและเอกสารที่ต้องส่ง (ประมาณ 10-30 วินาที)")
+        steps = draft_steps(pages, llm=llm)
+        unsure = sum(1 for st in steps if st["unsure"])
+        say(f"AI ร่างได้ {len(steps)} ขั้นตอน" + (f" มี {unsure} ขั้นตอนที่ AI ไม่แน่ใจ ให้ตรวจสอบเป็นพิเศษ" if unsure else ""))
+        return steps
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception:  # corrupt or unreadable file
@@ -150,14 +183,18 @@ def types(_: User = Depends(require_staff)):
 
 
 @router.post("/types")
-def create_type(name: str = Form(...), file: UploadFile = File(...), _: User = Depends(require_staff)):
+def create_type(request: Request, name: str = Form(...), file: UploadFile = File(...), _: User = Depends(require_staff)):
     path = _save_upload(file, "types")
-    try:
-        steps = _draft(path)
-    except HTTPException:
-        path.unlink(missing_ok=True)
-        raise
-    return {"version_id": state.get_tracker().create_type(name, steps, str(path)), "steps": steps}
+
+    def work(say):
+        try:
+            steps = _draft(path, say)
+        except HTTPException:
+            path.unlink(missing_ok=True)
+            raise
+        say("กำลังบันทึกฉบับร่าง")
+        return {"version_id": state.get_tracker().create_type(name, steps, str(path)), "steps": steps}
+    return _progress(request, work)
 
 
 class PublishIn(BaseModel):
@@ -206,14 +243,18 @@ def start_request(type_id: int, user: User = Depends(current_user)):
 
 
 @router.post("/types/{type_id}/versions")
-def new_version(type_id: int, file: UploadFile = File(...), _: User = Depends(require_staff)):
+def new_version(request: Request, type_id: int, file: UploadFile = File(...), _: User = Depends(require_staff)):
     path = _save_upload(file, "types")
-    try:
-        steps = _draft(path)
-    except HTTPException:
-        path.unlink(missing_ok=True)
-        raise
-    return {"version_id": state.get_tracker().new_version(type_id, steps, str(path)), "steps": steps}
+
+    def work(say):
+        try:
+            steps = _draft(path, say)
+        except HTTPException:
+            path.unlink(missing_ok=True)
+            raise
+        say("กำลังบันทึกฉบับร่าง")
+        return {"version_id": state.get_tracker().new_version(type_id, steps, str(path)), "steps": steps}
+    return _progress(request, work)
 
 
 @router.put("/versions/{vid}")
@@ -226,14 +267,18 @@ def edit_version(vid: int, body: StepsIn, _: User = Depends(require_staff)):
 
 
 @router.post("/versions/{vid}/redraft")
-def redraft(vid: int, _: User = Depends(require_staff)):
+def redraft(request: Request, vid: int, _: User = Depends(require_staff)):
     tk = state.get_tracker()
     v = tk.get_version(vid)
     if not v or v["status"] != "draft":
         raise HTTPException(400, "not an editable draft")
-    steps = _draft(Path(v["source_file"]))
-    tk.update_draft(vid, steps)
-    return {"steps": steps}
+
+    def work(say):
+        steps = _draft(Path(v["source_file"]), say)
+        say("กำลังบันทึกฉบับร่าง")
+        tk.update_draft(vid, steps)
+        return {"steps": steps}
+    return _progress(request, work)
 
 
 @router.post("/versions/{vid}/approve")
@@ -255,7 +300,7 @@ def _own_submission(sid: int, user: User) -> dict:
 
 
 @router.post("/submissions/{sid}/uploads")
-def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), user: User = Depends(current_user)):
+def upload(request: Request, sid: int, doc_name: str = Form(...), file: UploadFile = File(...), user: User = Depends(current_user)):
     sub = _own_submission(sid, user)
     n = sub["current_step"]
     if n >= sub["step_count"]:
@@ -265,16 +310,24 @@ def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), us
     if _approved_form(sub["type_id"], doc_name):
         raise HTTPException(400, "this document is filled in on the website, not uploaded")
     path = _save_upload(file, f"submissions/{sid}")
-    findings, status = None, "cannot_check"  # a failed check never blocks sending
-    try:
-        text = extract_text(path)
-        if text:
-            findings = screen_document(text, step, doc_name, None, llm=llm)
-            status = "screened"
-    except Exception:  # unreadable file or bad model output: report "cannot check", keep the upload
-        findings, status = None, "cannot_check"
-    uid = state.get_tracker().add_upload(sid, n, doc_name, file.filename or path.name, str(path), findings, status)
-    return {"upload_id": uid, "status": status, "findings": findings or []}
+
+    def work(say):
+        findings, status = None, "cannot_check"  # a failed check never blocks sending
+        try:
+            say("รับไฟล์แล้ว กำลังอ่านข้อความจากไฟล์")
+            text = extract_text(path)
+            if text:
+                say(f"อ่านได้ {len(text):,} ตัวอักษร AI กำลังตรวจสอบเอกสาร (ประมาณ 5-20 วินาที)")
+                findings = screen_document(text, step, doc_name, None, llm=llm)
+                status = "screened"
+            else:
+                say("อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นไฟล์สแกน) จึงข้ามการตรวจสอบโดย AI")
+        except Exception:  # unreadable file or bad model output: report "cannot check", keep the upload
+            findings, status = None, "cannot_check"
+            say("AI ตรวจสอบไม่สำเร็จ บันทึกไฟล์ไว้แล้ว ส่งให้เจ้าหน้าที่ได้")
+        uid = state.get_tracker().add_upload(sid, n, doc_name, file.filename or path.name, str(path), findings, status)
+        return {"upload_id": uid, "status": status, "findings": findings or []}
+    return _progress(request, work)
 
 
 def _doc_step(sub_or_version: dict, doc: str) -> dict | None:
@@ -341,7 +394,7 @@ def _answers_text(title: str, answers: list) -> str:
 
 
 @router.post("/submissions/{sid}/forms")
-def submit_form(sid: int, doc_name: str = Form(...), answers: str = Form("{}"), file_keys: list[str] = Form([]), files: list[UploadFile] = File([]),
+def submit_form(request: Request, sid: int, doc_name: str = Form(...), answers: str = Form("{}"), file_keys: list[str] = Form([]), files: list[UploadFile] = File([]),
                 user: User = Depends(current_user)):
     """Researcher fills the online form of a document. Saving again replaces the earlier answers until the document is sent."""
     sub = _own_submission(sid, user)
@@ -359,15 +412,21 @@ def submit_form(sid: int, doc_name: str = Form(...), answers: str = Form("{}"), 
     except Exception:
         raise HTTPException(400, "answers must be a JSON object")
     prev = next((u["answers"] for u in sorted(sub["uploads"], key=lambda u: -u["id"]) if u["doc_name"] == doc_name), [])
-    snap = _answers(form, raw, dict(zip(file_keys, files)), prev, sid)
-    findings, status = None, "cannot_check"
-    try:
-        findings = screen_document(_answers_text(form["title"], snap), step, doc_name, None, llm=llm)
-        status = "screened"
-    except Exception:
+    snap = _answers(form, raw, dict(zip(file_keys, files)), prev, sid)  # checked and files saved before streaming: the uploads are closed once this handler returns
+
+    def work(say):
         findings, status = None, "cannot_check"
-    uid = state.get_tracker().add_upload(sid, n, doc_name, form["title"], "", findings, status, snap)
-    return {"upload_id": uid, "status": status, "findings": findings or []}
+        say(f"ตรวจคำตอบครบแล้ว {len(snap)} ช่อง บันทึกไฟล์แนบแล้ว AI กำลังตรวจสอบคำตอบ (ประมาณ 5-20 วินาที)")
+        try:
+            findings = screen_document(_answers_text(form["title"], snap), step, doc_name, None, llm=llm)
+            status = "screened"
+            say(f"AI ตรวจสอบเสร็จ พบข้อสังเกต {len(findings)} ข้อ" if findings else "AI ตรวจสอบเสร็จ ไม่พบข้อสังเกต")
+        except Exception:
+            findings, status = None, "cannot_check"
+            say("AI ตรวจสอบไม่สำเร็จ บันทึกคำตอบไว้แล้ว ส่งให้เจ้าหน้าที่ได้")
+        uid = state.get_tracker().add_upload(sid, n, doc_name, form["title"], "", findings, status, snap)
+        return {"upload_id": uid, "status": status, "findings": findings or []}
+    return _progress(request, work)
 
 
 # ---- staff: draft, edit, approve the blank form of each document of a type ----
@@ -402,14 +461,21 @@ def list_forms(type_id: int, _: User = Depends(require_staff)):
 
 
 @router.post("/types/{type_id}/forms/draft")
-def draft_type_form(type_id: int, body: FormRef, _: User = Depends(require_staff)):
+def draft_type_form(request: Request, type_id: int, body: FormRef, _: User = Depends(require_staff)):
     v, step = _known_doc(type_id, body.doc_name)
-    try:
-        form = draft_form(body.doc_name, step, v["type_name"], Path(v["source_file"]) if v.get("source_file") else None, llm=llm)
-    except Exception as e:  # bad model output or model unreachable: nothing is saved
-        raise HTTPException(502, f"could not draft the form: {e}")
-    state.get_tracker().put_form(type_id, body.doc_name, form["title"], form["fields"])
-    return {"doc_name": body.doc_name, "status": "draft", **form}
+
+    def work(say):
+        say(f"กำลังอ่านคู่มือของ “{v['type_name']}” และขั้นตอน “{step['title']}”")
+        say(f"AI กำลังออกแบบช่องกรอกของ “{body.doc_name}” (ประมาณ 10-30 วินาที)")
+        try:
+            form = draft_form(body.doc_name, step, v["type_name"], Path(v["source_file"]) if v.get("source_file") else None, llm=llm)
+        except Exception as e:  # bad model output or model unreachable: nothing is saved
+            raise HTTPException(502, f"could not draft the form: {e}")
+        kinds = sorted({f["type"] for f in form["fields"]})
+        say(f"AI ร่างได้ {len(form['fields'])} ช่อง ({len(kinds)} ชนิด) กำลังบันทึกฉบับร่าง")
+        state.get_tracker().put_form(type_id, body.doc_name, form["title"], form["fields"])
+        return {"doc_name": body.doc_name, "status": "draft", **form}
+    return _progress(request, work)
 
 
 @router.put("/types/{type_id}/forms")
