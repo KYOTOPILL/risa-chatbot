@@ -1,4 +1,5 @@
 """Tracking dashboard API: mock login, submissions, step moves. Rules live in tracker.py; this only maps users and HTTP."""
+import hashlib
 import re
 import secrets
 from pathlib import Path
@@ -12,6 +13,7 @@ from auth import User, authenticate, current_user, require_staff, session_value
 from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
 from extract import extract_pages, extract_text
 from rag import chat as llm
+from forms_ai import build_docx, draft_form
 from steps_ai import draft_steps, find_template, screen_document
 
 router = APIRouter(prefix="/api/track")
@@ -224,6 +226,27 @@ def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), us
         findings, status = None, "cannot_check"
     uid = state.get_tracker().add_upload(sid, n, doc_name, file.filename or path.name, str(path), findings, status)
     return {"upload_id": uid, "status": status, "findings": findings or []}
+
+
+@router.get("/submissions/{sid}/form")
+def blank_form(sid: int, doc: str, user: User = Depends(current_user)):
+    """Blank form for one document of the submission: the official template if there is one, else an AI-made .docx (made once, kept on disk)."""
+    sub = state.get_tracker().get_submission(sid, user.id, user.role)
+    if sub is None:
+        raise HTTPException(404, "not found")
+    step = next((s for s in sub["steps"] if doc in s["documents"]), None)
+    if step is None:
+        raise HTTPException(400, "not a document of this submission")
+    tpl = find_template(doc)
+    if tpl:
+        return FileResponse(tpl, filename=tpl.name)
+    path = UPLOAD_DIR / "forms" / (hashlib.sha1(f"{sub['type_name']}\0{doc}".encode()).hexdigest()[:16] + ".docx")
+    if not path.exists():
+        try:
+            build_docx(draft_form(doc, step, sub["type_name"], llm=llm), path)
+        except Exception as e:  # bad model output or model unreachable: nothing is saved, the next try asks again
+            raise HTTPException(502, f"could not draft the form: {e}")
+    return FileResponse(path, filename=re.sub(r'[\\/:*?"<>|]', "_", doc) + ".docx")  # keep Thai vowel marks, drop only characters a file name cannot hold
 
 
 @router.post("/uploads/{uid}/send")

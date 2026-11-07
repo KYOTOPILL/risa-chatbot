@@ -76,6 +76,7 @@ function docRow(sub, name, reload) {
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)")) : null,
     h("div", { class: "actions" }, pick,
+      h("a", { class: "ghost", href: "/api/track/submissions/" + sub.id + "/form?doc=" + encodeURIComponent(name), title: "ถ้ายังไม่มีแบบฟอร์มทางการ AI จะร่างให้ ตรวจกับแบบฟอร์มจริงก่อนส่ง" }, "ดาวน์โหลดแบบฟอร์มเปล่า"),
       h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"),
       canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจ") : null));
 }
