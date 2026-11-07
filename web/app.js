@@ -153,6 +153,7 @@ $("new").addEventListener("click", () => {
   input.focus();
 });
 
+if (window.self !== window.top) document.documentElement.classList.add("embedded");  // shown inside the researcher drawer
 load();
 // restore earlier turns after a page refresh (file cards and time stamps are not restored)
 for (const t of history) add(t.role, t.content, [], false, "");

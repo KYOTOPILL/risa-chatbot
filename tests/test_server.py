@@ -223,3 +223,10 @@ def test_stream_cached_question_skips_the_model_and_errors_are_thai(client):
 def test_pages_link_to_each_other(client):
     assert 'href="/" target="_top"' in client.get("/chat").text  # _top: inside the drawer it must leave the iframe
     assert 'href="/chat"' in client.get("/").text
+
+
+@pytest.mark.parametrize("path", ["/", "/chat"])
+def test_pages_are_mobile_ready(client, path):
+    html = client.get(path).text
+    assert "width=device-width" in html and "viewport-fit=cover" in html
+    assert 'name="theme-color"' in html  # tints the phone's address bar

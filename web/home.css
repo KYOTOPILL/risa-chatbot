@@ -139,3 +139,15 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 @media (max-width: 700px) { .login-grid { grid-template-columns: 1fr; } }
 /* room under the last card for the floating chat button */
 .adm { padding-bottom: 88px; }
+
+/* ---- phones ---- */
+.card { overflow-wrap: anywhere; }  /* long titles and file names wrap instead of widening the page */
+.list-row { flex-wrap: wrap; }
+dialog { max-width: calc(100vw - 32px); }
+.toast { max-width: calc(100vw - 32px); }
+.chat-fab { right: max(18px, env(safe-area-inset-right)); }
+@media (max-width: 480px) {
+  .card { padding: 14px; }
+  .ws-menu .ghost { flex: 1 1 calc(50% - 8px); }  /* four menu buttons as a 2x2 grid */
+  .chat-drawer { width: 100vw; height: 100dvh; bottom: auto; border-left: 0; }  /* dvh: the address bar must not hide the composer */
+}
