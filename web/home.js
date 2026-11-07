@@ -177,7 +177,7 @@ async function staffDetail(sid) {
 async function staffQueue(body, q, subs) {
   const now = new Date().toISOString(), st = staffStats(q, subs, now);
   const stat = (n, label) => h("div", { class: "stat" }, h("b", {}, String(n)), h("span", {}, label));
-  body.append(h("h1", { class: "page-title" }, "เอกสารรอตรวจ"), h("p", { class: "muted sub" }, "เรียงจากส่งมาก่อน"),
+  body.append(...[h("h1", { class: "page-title" }, "เอกสารรอตรวจ"), h("p", { class: "muted sub" }, "เรียงจากส่งมาก่อน"),
     q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจ"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจเกิน 7 วัน")) : null,
     q.length ? h("div", {}, q.map((u) => {
     const dismissed = new Set();
@@ -197,7 +197,7 @@ async function staffQueue(body, q, subs) {
         h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
         h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
         mine ? null : h("span", { class: "muted" }, "เฉพาะผู้ดูแลเท่านั้น")));
-  })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ไม่มีเอกสารรอตรวจ"), h("p", { class: "muted" }, "เมื่อนักวิจัยกดส่งเอกสาร จะแสดงที่นี่")));
+  })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ไม่มีเอกสารรอตรวจ"), h("p", { class: "muted" }, "เมื่อนักวิจัยกดส่งเอกสาร จะแสดงที่นี่"))].filter(Boolean));
 }
 
 async function staffTypes(body) {
