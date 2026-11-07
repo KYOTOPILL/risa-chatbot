@@ -41,29 +41,27 @@ function answersView(up) {
     h("dd", {}, a.value && a.value.name ? h("a", { href: "/api/track/uploads/" + up.id + "/answer-file?key=" + encodeURIComponent(a.key), target: "_blank" }, a.value.name) : (a.value || "—")))));
 }
 
-// ---------- staff: tab แบบฟอร์ม ----------
-async function staffForms(body) {
-  const types = (await api("/types")).filter((t) => t.status === "approved");
-  const all = await Promise.all(types.map(async (t) => [t, Object.fromEntries((await api("/types/" + t.type_id + "/forms")).map((f) => [f.doc_name, f]))]));
-  const again = () => staffHome();
-  const row = (t, doc, f) => h("div", { class: "list-row" },
+// ---------- staff: the แบบฟอร์ม section of a type's page ----------
+const docsOf = (t) => [...new Set(t.steps.flatMap((s) => s.documents))];
+const formsByDoc = async (t) => Object.fromEntries((await api("/types/" + t.type_id + "/forms")).map((f) => [f.doc_name, f]));
+
+async function formsSection(t) {
+  const by = await formsByDoc(t), docs = docsOf(t);
+  const row = (doc, f) => h("div", { class: "list-row" },
     h("span", { class: "grow" }, h("b", {}, doc), h("span", { class: "muted block" }, FORM_STATUS(f) + (f ? " · " + f.fields.length + " ช่อง" : ""))),
     h("span", { class: "tools" },
       h("button", { class: f ? "ghost" : "primary", type: "button", onclick: act(async (ev) => {
         if (f && !confirm("ให้ AI ร่างใหม่? ฟอร์มเดิมของเอกสารนี้จะถูกแทนที่")) return;
         ev.target.disabled = true; ev.target.textContent = "AI กำลังสร้าง…";
         let out;
-        try { out = await api("/types/" + t.type_id + "/forms/draft", send("POST", { doc_name: doc })); } catch (e) { again(); throw e; }
+        try { out = await api("/types/" + t.type_id + "/forms/draft", send("POST", { doc_name: doc })); } catch (e) { staffHome(); throw e; }
         formEditor(t, { ...out, doc_name: doc });
       }) }, f ? "ให้ AI ร่างใหม่" : "ให้ AI สร้างฟอร์ม"),
       f ? h("button", { class: "ghost", type: "button", onclick: () => formEditor(t, f) }, "แก้ไข") : null,
-      f && f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/forms/approve", send("POST", { doc_name: doc })); again(); }) }, "อนุมัติ") : null));
-  body.append(...[h("h1", { class: "page-title" }, "แบบฟอร์ม"),
-    h("p", { class: "muted sub" }, "AI ร่างช่องกรอกจากคู่มือของประเภทงาน เจ้าหน้าที่แก้ไขและอนุมัติ นักวิจัยกรอกและแนบไฟล์ในเว็บ เอกสารที่ไม่มีฟอร์มยังอัปโหลดไฟล์ตามเดิม"),
-    all.length ? all.map(([t, by]) => {
-      const docs = [...new Set(t.steps.flatMap((s) => s.documents))];
-      return h("section", { class: "card" }, h("h2", {}, t.type_name), docs.length ? docs.map((d) => row(t, d, by[d])) : h("p", { class: "muted" }, "ประเภทงานนี้ไม่มีเอกสารที่ต้องส่ง"));
-    }) : h("section", { class: "card empty" }, h("b", {}, "ยังไม่มีประเภทงานที่อนุมัติ"), h("p", { class: "muted" }, "สร้างและอนุมัติประเภทงานก่อน (เมนู ประเภทงาน)"))].flat());
+      f && f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/forms/approve", send("POST", { doc_name: doc })); staffHome(); }) }, "อนุมัติ") : null));
+  return h("section", { class: "card" }, h("h2", {}, "แบบฟอร์ม"),
+    h("p", { class: "muted sub" }, "AI ร่างช่องกรอกจากคู่มือ เจ้าหน้าที่แก้ไขและอนุมัติ นักวิจัยกรอกและแนบไฟล์ในเว็บ เอกสารที่ไม่มีฟอร์มยังอัปโหลดไฟล์ตามเดิม"),
+    docs.length ? docs.map((d) => row(d, by[d])) : h("p", { class: "muted" }, "ประเภทงานนี้ไม่มีเอกสารที่ต้องส่ง"));
 }
 
 // Editor: one line per question, settings of the selected line in a side panel; แก้ไข and ตัวอย่าง are two tabs.

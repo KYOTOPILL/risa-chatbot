@@ -250,3 +250,4 @@ dialog { max-width: calc(100vw - 32px); }
 .formbar { position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; background: var(--bg); margin-bottom: 8px; }
 @media (max-width: 800px) { .qgrid { grid-template-columns: 1fr; } .qpanel { position: static; } .qrow { grid-template-columns: 28px 1fr 90px; } .qrow > :nth-child(4) { display: none; } }
 @media (max-width: 700px) { .fe-top { grid-template-columns: 1fr; } }
+.steplist { margin: 0; padding-left: 22px; display: grid; gap: 8px; }

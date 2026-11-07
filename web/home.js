@@ -120,17 +120,17 @@ async function researcherHome() {
 }
 
 // ---------- staff ----------
-let tab = "queue";
+let tab = "queue", openType = null;  // openType: the type whose page is open in the ประเภทงาน tab
 let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
-  const items = [["queue", "queue", "รอตรวจ", queue.length], ["subs", "list", "ทุกงาน"], null, ["types", "types", "ประเภทงาน"], ["forms", "form", "แบบฟอร์ม"], ["files", "folder", "เอกสารสำหรับแชท"]];
+  const items = [["queue", "queue", "รอตรวจ", queue.length], ["subs", "list", "ทุกงาน"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "เอกสารสำหรับแชท"]];
   const body = h("div", { class: "ws-main" });
-  const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; staffHome(); } },
+  const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; staffHome(); } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
   show(h("div", { class: "ws" }, menu, body));
-  ({ subs: staffSubs, queue: (b) => staffQueue(b, queue, subs), types: staffTypes, forms: staffForms, files: staffFiles })[tab](body).catch(fail);
+  ({ subs: staffSubs, queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
 }
 
 async function staffFiles(body) {
@@ -214,6 +214,8 @@ async function staffQueue(body, q, subs) {
 
 async function staffTypes(body) {
   const types = await api("/types");
+  const open = openType && types.find((t) => t.type_id === openType);
+  if (open) return typePage(body, open);
   const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง, ขออนุมัติจริยธรรมการวิจัย" });
   const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
     const file = ev.target.files[0];
@@ -221,13 +223,29 @@ async function staffTypes(body) {
     const out = await api("/types", form({ name: name.value.trim() || file.name, file }));
     draftEditor(out.version_id);
   }) });
-  body.append(
-    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI จะร่างขั้นตอนและเอกสารที่ต้องส่งให้ตรวจก่อนใช้งานจริง"), name, h("div", { class: "actions" }, pick,
-      h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารและให้ AI ร่างขั้นตอน"))),
-    h("section", { class: "card" }, h("h2", {}, "ประเภทงานทั้งหมด"), types.map((t) => h("div", { class: "list-row" },
-      h("span", {}, t.type_name, " v" + t.version, " ", h("span", { class: "muted" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : "ใช้งานอยู่ · " + t.steps.length + " ขั้นตอน")),
-      t.status === "draft" ? h("button", { class: "ghost", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจและอนุมัติ")
-        : h("span", { class: "tools" }, postControls(t), newVersionButton(t))))));
+  const counts = Object.fromEntries(await Promise.all(types.filter((t) => t.status === "approved").map(async (t) => {
+    const by = await formsByDoc(t), docs = docsOf(t);
+    return [t.id, docs.length ? "ฟอร์ม " + docs.filter((d) => by[d]?.status === "approved").length + "/" + docs.length + " พร้อม" : "ไม่มีเอกสาร"];
+  })));
+  body.append(h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "ขั้นตอน เอกสาร แบบฟอร์ม และการเปิดรับของแต่ละประเภทงาน อยู่ในหน้าเดียวกัน"),
+    h("section", { class: "card" }, types.length ? types.map((t) => h("div", { class: "list-row" },
+      h("span", { class: "grow" }, h("b", {}, t.type_name), " ", h("span", { class: "muted" }, "v" + t.version),
+        h("span", { class: "muted block" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : t.steps.length + " ขั้นตอน · " + counts[t.id])),
+      t.status === "approved" && t.open ? h("span", { class: "badge ok" }, "เปิดรับ") : null,
+      t.status === "draft" ? h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจและอนุมัติ")
+        : h("button", { class: "ghost", type: "button", onclick: () => { openType = t.type_id; staffHome(); } }, "จัดการ")))
+      : h("p", { class: "muted" }, "ยังไม่มีประเภทงาน อัปโหลดคู่มือด้านล่างเพื่อเริ่ม")),
+    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI จะร่างขั้นตอนและเอกสารที่ต้องส่งให้ตรวจก่อนใช้งานจริง"), name,
+      h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารและให้ AI ร่างขั้นตอน"))));
+}
+
+// one page per type: steps and documents, forms, and the post (open for researchers)
+async function typePage(body, t) {
+  const steps = h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, "ขั้นตอนและเอกสาร"), newVersionButton(t)),
+    h("ol", { class: "steplist" }, t.steps.map((s) => h("li", {}, h("b", {}, s.title), h("span", { class: "muted block" }, s.documents.length ? "เอกสาร: " + s.documents.join(", ") : "ไม่ต้องส่งเอกสาร")))));
+  const post = h("section", { class: "card" }, h("h2", {}, "เปิดรับ"), h("p", { class: "muted sub" }, "เมื่อเปิดรับ นักวิจัยทุกคนเห็นงานนี้และกดเริ่มส่งเองได้ ผู้ดูแลคือเจ้าหน้าที่ที่เลือก"), postControls(t));
+  body.append(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: () => { openType = null; staffHome(); } }, "← ประเภทงานทั้งหมด")),
+    h("h1", { class: "page-title" }, t.type_name), h("p", { class: "muted sub" }, "v" + t.version + " · ใช้งานอยู่"), steps, await formsSection(t), post);
 }
 
 // open a type as a post researchers can start from; the owner is staff in charge of every request started from it
