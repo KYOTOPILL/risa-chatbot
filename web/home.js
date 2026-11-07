@@ -227,8 +227,9 @@ async function staffSubs(body, queue = []) {
       && (!who.value || s.staff_id === who.value)
       && (!status.value || (status.value === "review" ? waiting.has(s.id) : status.value === "done" ? s.current_step >= s.step_count : s.current_step < s.step_count)));
     count.textContent = shown.length === subs.length ? subs.length + " รายการ" : shown.length + " จาก " + subs.length + " รายการ";
+    const short = (s) => s.title.startsWith(s.type_name + " - ") ? s.title.slice(s.type_name.length + 3) : s.title;  // the type is already the group's heading
     const row = (s) => h("div", { class: "list-row" },
-      h("span", { class: "grow" }, h("b", {}, s.title), " ", waiting.has(s.id) ? h("span", { class: "badge warn" }, "รอตรวจสอบ") : null,
+      h("span", { class: "grow" }, h("b", {}, short(s)), " ", waiting.has(s.id) ? h("span", { class: "badge warn" }, "รอตรวจสอบ") : null,
         h("span", { class: "muted block" }, "นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้รับผิดชอบ " + nm(s.staff_id))),
       progress(s),
       h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "ดูรายละเอียด"));
