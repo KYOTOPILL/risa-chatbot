@@ -216,7 +216,7 @@ dialog { max-width: calc(100vw - 32px); }
 .answers { display: grid; gap: 10px; margin: 12px 0; }
 .answers dt { font-size: .82rem; }
 .answers dd { margin: 0; overflow-wrap: anywhere; }
-.editgrid { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; align-items: start; }
 .fieldedit { display: grid; gap: 8px; padding: 14px 0; border-top: 1px solid var(--line); }
-.fe-top { display: grid; grid-template-columns: 1fr 150px auto; gap: 8px; align-items: center; }
-@media (max-width: 900px) { .editgrid { grid-template-columns: 1fr; } .fe-top { grid-template-columns: 1fr; } }
+.fe-top { display: grid; grid-template-columns: 1fr 170px; gap: 8px; align-items: center; }
+.fe-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 700px) { .fe-top { grid-template-columns: 1fr; } }
