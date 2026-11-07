@@ -222,6 +222,28 @@ def close(type_id: int, _: User = Depends(require_staff)):
     return {"ok": True}
 
 
+def _delete(call, arg: int) -> dict:
+    try:
+        files = call(arg)
+    except KeyError:
+        raise HTTPException(404, "not found")
+    except ValueError:
+        raise HTTPException(409, "มีงานที่ใช้อยู่แล้ว ลบไม่ได้")
+    for f in files:
+        Path(f).unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@router.delete("/types/{type_id}")
+def delete_type(type_id: int, _: User = Depends(require_staff)):
+    return _delete(state.get_tracker().delete_type, type_id)
+
+
+@router.delete("/versions/{vid}")
+def delete_version(vid: int, _: User = Depends(require_staff)):
+    return _delete(state.get_tracker().delete_version, vid)
+
+
 @router.get("/open-types")
 def open_types(_: User = Depends(current_user)):
     return [{"type_id": v["type_id"], "type_name": v["type_name"], "owner_id": v["owner_id"], "owner_name": MOCK_USERS.get(v["owner_id"], {}).get("name", ""),

@@ -118,6 +118,37 @@ class Tracker:
         with self._db() as db:
             db.execute("UPDATE versions SET status = 'approved' WHERE id = ?", (version_id,))
 
+    def _used(self, db, where: str, arg: int) -> bool:
+        return bool(db.execute(f"SELECT 1 FROM submissions s JOIN versions v ON v.id = s.version_id WHERE {where} = ?", (arg,)).fetchone())
+
+    def delete_version(self, version_id: int) -> list[str]:
+        """Delete one version, and its type when it was the last. Refused while requests use it. Returns source files to remove."""
+        with self._db() as db:
+            row = db.execute("SELECT type_id, source_file FROM versions WHERE id = ?", (version_id,)).fetchone()
+            if not row:
+                raise KeyError(version_id)
+            if self._used(db, "v.id", version_id):
+                raise ValueError("requests already use this version")
+            db.execute("DELETE FROM versions WHERE id = ?", (version_id,))
+            files = [row["source_file"]]
+            if not db.execute("SELECT 1 FROM versions WHERE type_id = ?", (row["type_id"],)).fetchone():
+                db.execute("DELETE FROM forms WHERE type_id = ?", (row["type_id"],))
+                db.execute("DELETE FROM types WHERE id = ?", (row["type_id"],))
+        return files
+
+    def delete_type(self, type_id: int) -> list[str]:
+        """Delete a type with all its versions and forms. Refused while any request uses it. Returns source files to remove."""
+        with self._db() as db:
+            rows = db.execute("SELECT source_file FROM versions WHERE type_id = ?", (type_id,)).fetchall()
+            if not db.execute("SELECT 1 FROM types WHERE id = ?", (type_id,)).fetchone():
+                raise KeyError(type_id)
+            if self._used(db, "v.type_id", type_id):
+                raise ValueError("requests already use this type")
+            for t in ("forms", "versions"):
+                db.execute(f"DELETE FROM {t} WHERE type_id = ?", (type_id,))
+            db.execute("DELETE FROM types WHERE id = ?", (type_id,))
+        return [r["source_file"] for r in rows]
+
     _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id FROM versions v JOIN types t ON t.id = v.type_id"
 
     @staticmethod

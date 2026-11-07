@@ -116,3 +116,27 @@ def test_staff_type_list_shows_open_state_and_owner(env):
     publish(s1, tid, owner_id="s2")
     t = s1.get("/api/track/types").json()[0]
     assert t["open"] == 1 and t["owner_id"] == "s2"
+
+
+def test_staff_delete_draft_and_unused_type(env):
+    tk, tid = env
+    s1 = client("s1")
+    d = tk.new_version(tid, STEPS, "t2.pdf")
+    assert s1.delete(f"/api/track/versions/{d}").status_code == 200
+    assert [v["status"] for v in s1.get("/api/track/types").json()] == ["approved"]  # type stays, only the draft went
+    tk.put_form(tid, "Form A", "Form A", [{"label": "Name", "type": "text"}])
+    assert s1.delete(f"/api/track/types/{tid}").status_code == 200
+    assert s1.get("/api/track/types").json() == [] and tk.list_forms(tid) == []
+    assert s1.delete(f"/api/track/types/{tid}").status_code == 404
+
+
+def test_delete_refused_when_requests_use_it_or_not_staff(env):
+    tk, tid = env
+    publish(client("s1"), tid)
+    sid = client("r1").post(f"/api/track/open-types/{tid}/start").json()["id"]
+    s1 = client("s1")
+    assert s1.delete(f"/api/track/types/{tid}").status_code == 409
+    vid = tk.list_types()[0]["id"]
+    assert s1.delete(f"/api/track/versions/{vid}").status_code == 409
+    assert client("r1").delete(f"/api/track/types/{tid}").status_code == 403
+    assert client("r1").get(f"/api/track/submissions/{sid}").status_code == 200  # request untouched
