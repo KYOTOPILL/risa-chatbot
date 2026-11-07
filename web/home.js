@@ -122,7 +122,8 @@ function docRow(sub, name, reload) {
     runProgress(ev.target, "กำลังตรวจสอบ “" + name + "”", (say) => apiStream("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }), say), reload, reload);
   } });
   const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจสอบ") : null;
-  return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"),
+  const withdraw = up && up.status === "sent" ? h("button", { class: "ghost", type: "button", onclick: act(async () => { if (confirm("ถอนเอกสารนี้กลับมาแก้ไข? เจ้าหน้าที่จะไม่เห็นในคิวตรวจสอบจนกว่าจะส่งใหม่")) { await api("/uploads/" + up.id + "/withdraw", { method: "POST" }); reload(); } }) }, "ถอนกลับมาแก้ไข") : null;
+  return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"), withdraw,
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)"))
       : up && up.note && !locked ? h("p", { class: "err" }, "หมายเหตุจากเจ้าหน้าที่ที่ส่งกลับ: " + up.note) : null,
@@ -131,6 +132,12 @@ function docRow(sub, name, reload) {
       : h("div", { class: "actions" }, pick, h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"), sendBtn));
 }
 
+const cancelRequest = (sub, after) => h("button", { class: "ghost danger", type: "button", onclick: act(async () => {
+  if (!confirm("ยกเลิกงาน “" + sub.title + "” ? ข้อมูลที่กรอกไว้จะถูกลบ")) return;
+  await api("/submissions/" + sub.id, { method: "DELETE" });
+  after();
+}) }, "ยกเลิกงานนี้");
+
 function subCard(sub) {
   const step = sub.steps[sub.current_step];
   const staff = users.find((u) => u.id === sub.staff_id);
@@ -138,7 +145,8 @@ function subCard(sub) {
     h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · เจ้าหน้าที่ผู้รับผิดชอบ: " + (staff ? staff.name : sub.staff_id)), stepper(sub),
     step ? h("div", {}, h("h3", {}, "เอกสารสำหรับขั้นตอนนี้"),
       step.documents.length ? step.documents.map((name) => docRow(sub, name, () => researcherHome().catch(fail))) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
-      : h("p", {}, "ดำเนินการเสร็จสิ้น"));
+      : h("p", {}, "ดำเนินการเสร็จสิ้น"),
+    sub.current_step >= sub.step_count ? null : h("div", { class: "actions end" }, cancelRequest(sub, () => researcherHome().catch(fail))));
 }
 
 function openPosts(posts, subs) {
@@ -147,7 +155,7 @@ function openPosts(posts, subs) {
     posts.map((p) => h("div", { class: "list-row" },
       h("span", {}, h("b", {}, p.type_name), " ", h("span", { class: "muted" }, p.steps.length + " ขั้นตอน · เอกสาร: " + ([...new Set(p.steps.flatMap((s) => s.documents))].join(", ") || "ไม่มี") + " · ผู้รับผิดชอบ " + p.owner_name)),
       (() => {
-        const mine = subs.find((s) => s.type_id === p.type_id), go = (id) => document.getElementById("sub-" + id)?.scrollIntoView({ behavior: "smooth" });
+        const mine = subs.find((s) => s.type_id === p.type_id), go = (id) => { const el = document.getElementById("sub-" + id); el?.closest("details")?.setAttribute("open", ""); el?.scrollIntoView({ behavior: "smooth" }); };
         return mine ? h("button", { class: "ghost", type: "button", onclick: () => go(mine.id) }, "ไปที่งานของฉัน")
           : h("button", { class: "primary", type: "button", onclick: act(async () => { const out = await api("/open-types/" + p.type_id + "/start", { method: "POST" }); await researcherHome(); go(out.id); }) }, "เริ่มส่ง");
       })())));
@@ -165,7 +173,9 @@ async function researcherHome() {
         h("button", { class: "ghost", type: "button", onclick: () => document.getElementById("sub-" + t.sub.id).scrollIntoView({ behavior: "smooth" }) }, "ไปที่งานนี้")))
         : h("p", { class: "muted" }, "ไม่มีงานค้าง")),
     openPosts(posts, subs),
-    subs.length ? subs.map(subCard) : h("section", { class: "card" }, h("p", { class: "muted" }, posts.length ? "ยังไม่มีงานของคุณ เริ่มจาก “งานที่เปิดรับ” ด้านบน" : "ยังไม่มีงาน และยังไม่มีงานที่เปิดรับ")));
+    ...(subs.some((s) => s.current_step < s.step_count) ? subs.filter((s) => s.current_step < s.step_count).map(subCard) : []),
+    subs.some((s) => s.current_step >= s.step_count) ? h("details", { class: "card done-sub" }, h("summary", {}, "งานที่เสร็จสิ้น (" + subs.filter((s) => s.current_step >= s.step_count).length + ")"), subs.filter((s) => s.current_step >= s.step_count).map(subCard)) : null,
+    subs.length ? null : h("section", { class: "card" }, h("p", { class: "muted" }, posts.length ? "ยังไม่มีงานของคุณ เริ่มจาก “งานที่เปิดรับ” ด้านบน" : "ยังไม่มีงาน และยังไม่มีงานที่เปิดรับ")));
 }
 
 // ---------- staff ----------
@@ -259,7 +269,8 @@ async function staffDetail(sid) {
       h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
         h("button", { class: "primary", type: "button", disabled: !mine || sub.current_step >= sub.step_count, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
-        mine ? null : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้รับผิดชอบเท่านั้นที่แก้ไขได้"))),
+        mine ? h("button", { class: "ghost danger", type: "button", onclick: act(async () => { if (confirm("ลบงาน “" + sub.title + "” ทั้งหมด? ย้อนกลับไม่ได้")) { await api("/submissions/" + sid, { method: "DELETE" }); staffHome(); } }) }, "ลบงานนี้")
+          : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้รับผิดชอบเท่านั้นที่แก้ไขได้"))),
     h("section", { class: "card" }, h("h2", {}, "เอกสารของขั้นตอนนี้"),
       mine ? h("p", { class: "muted sub" }, "กรอกหรืออัปโหลดแทนนักวิจัยได้จนกว่าจะส่ง เมื่อส่งแล้วตรวจสอบและอนุมัติได้ที่นี่") : h("p", { class: "muted sub" }, "ดูได้อย่างเดียว"),
       sub.current_step >= sub.step_count ? h("p", { class: "muted" }, "ดำเนินการเสร็จสิ้น")
@@ -302,11 +313,11 @@ async function staffTypes(body) {
   const types = await api("/types");
   const open = openType && types.find((t) => t.type_id === openType);
   if (open) return typePage(body, open);
-  const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง, ขออนุมัติจริยธรรมการวิจัย" });
+  const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน (เว้นว่างไว้ให้ AI ตั้งชื่อจากเอกสาร) เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง" });
   const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
-    runProgress(ev.target, "AI กำลังร่างขั้นตอนจาก “" + file.name + "”", (say) => apiStream("/types", form({ name: name.value.trim() || file.name, file }), say), (out) => draftEditor(out.version_id), staffHome);
+    runProgress(ev.target, "AI กำลังร่างขั้นตอนจาก “" + file.name + "”", (say) => apiStream("/types", form({ name: name.value.trim(), file }), say), (out) => draftEditor(out.version_id), staffHome);
   } });
   const counts = Object.fromEntries(await Promise.all(types.filter((t) => t.status === "approved").map(async (t) => {
     const by = await formsByDoc(t), docs = docsOf(t);

@@ -350,3 +350,43 @@ def test_return_note_stays_after_saving_a_draft(env):
     r1.post(f"/api/track/submissions/{sid}/forms", data={"doc_name": "Travel claim", "answers": "{}", "draft": "true"})
     up = r1.get(f"/api/track/submissions/{sid}").json()["uploads"][0]
     assert up["status"] == "draft" and up["note"] == "fix budget"
+
+
+def test_researcher_withdraws_a_sent_document_and_sends_again(env):
+    _, sid, tid, _ = env
+    publish_form(tid)
+    r1, s1 = client("r1"), client("s1")
+    uid = fill(r1, sid).json()["upload_id"]
+    r1.post(f"/api/track/uploads/{uid}/send")
+    assert s1.get("/api/track/review-queue").json() != []
+    assert client("r2").post(f"/api/track/uploads/{uid}/withdraw").status_code == 404
+    assert r1.post(f"/api/track/uploads/{uid}/withdraw").status_code == 200
+    assert s1.get("/api/track/review-queue").json() == []
+    assert r1.post(f"/api/track/uploads/{uid}/withdraw").status_code == 400  # no longer sent
+    assert r1.post(f"/api/track/uploads/{uid}/send").status_code == 200
+    assert any("ถอนกลับ" in t for t in _notes("s1"))
+
+
+def test_cancel_request_researcher_until_sent_staff_in_charge_any_time(env):
+    tk, sid, tid, _ = env
+    publish_form(tid)
+    r1 = client("r1")
+    uid = fill(r1, sid).json()["upload_id"]
+    assert client("r2").delete(f"/api/track/submissions/{sid}").status_code == 404
+    r1.post(f"/api/track/uploads/{uid}/send")
+    assert r1.delete(f"/api/track/submissions/{sid}").status_code == 409  # with staff now
+    assert client("s2").delete(f"/api/track/submissions/{sid}").status_code == 404
+    assert client("s1").delete(f"/api/track/submissions/{sid}").status_code == 200
+    assert tk.get_submission(sid, "s1", "staff") is None and client("s1").get("/api/track/review-queue").json() == []
+    assert client("s1").delete(f"/api/track/submissions/{sid}").status_code == 404
+
+
+def test_researcher_cancels_an_unsent_request_and_files_go(env):
+    tk, sid, tid, _ = env
+    publish_form(tid)
+    r1 = client("r1")
+    fill(r1, sid)
+    files = [p for p in tracker_api.UPLOAD_DIR.rglob("*") if p.is_file()]
+    assert files
+    assert r1.delete(f"/api/track/submissions/{sid}").status_code == 200
+    assert not [p for p in tracker_api.UPLOAD_DIR.rglob("*") if p.is_file()]

@@ -393,3 +393,21 @@ def test_send_twice_is_400(up):
     uid = put(r, sid).json()["upload_id"]
     assert r.post(f"/api/track/uploads/{uid}/send").status_code == 200
     assert r.post(f"/api/track/uploads/{uid}/send").status_code == 400
+
+
+def test_blank_type_name_is_made_by_the_ai_from_the_document(ai, monkeypatch):
+    monkeypatch.setattr(tracker_api, "llm", lambda m: "ทุนวิจัยตัวอย่าง" if "ตั้งชื่อ" in m[0]["content"] else GOOD)
+    s1 = login("s1")
+    r = s1.post("/api/track/types", data={"name": ""}, files={"file": ("แบบ (ลงนามแล้ว).pdf", pdf_bytes(), "application/pdf")})
+    assert r.status_code == 200 and r.json()["name"] == "ทุนวิจัยตัวอย่าง"
+    assert any(t["type_name"] == "ทุนวิจัยตัวอย่าง" for t in s1.get("/api/track/types").json())
+
+
+def test_blank_type_name_falls_back_to_a_clean_file_name(ai, monkeypatch):
+    def llm(m):
+        if "ตั้งชื่อ" in m[0]["content"]:
+            raise RuntimeError("model down")
+        return GOOD
+    monkeypatch.setattr(tracker_api, "llm", llm)
+    r = login("s1").post("/api/track/types", data={"name": ""}, files={"file": ("แบบรายงาน_สถานะ (ลงนามแล้ว).pdf", pdf_bytes(), "application/pdf")})
+    assert r.status_code == 200 and r.json()["name"] == "แบบรายงาน สถานะ"

@@ -277,3 +277,5 @@ dialog { max-width: calc(100vw - 32px); }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .filters input[type=search] { flex: 1 1 220px; }
 .top { position: relative; }
+.done-sub > summary { cursor: pointer; font-weight: 600; }
+.done-sub[open] > summary { margin-bottom: 14px; }

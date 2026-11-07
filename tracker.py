@@ -335,6 +335,28 @@ class Tracker:
         title, staff = self._title_staff(up["submission_id"])
         self._notify(up["submission_id"], f"{up['doc_name']} ส่งแล้ว รอตรวจสอบ ({title})", [staff], actor)
 
+    def withdraw_upload(self, upload_id: int) -> None:
+        """Take a sent document back from the staff queue. It returns to the state before sending, so it can be edited and sent again."""
+        with self._db() as db:
+            if not db.execute("UPDATE uploads SET status = 'screened' WHERE id = ? AND status = 'sent'", (upload_id,)).rowcount:
+                raise ValueError("document is not waiting for review")
+        up = self.get_upload(upload_id)
+        self._notify(up["submission_id"], f"{up['doc_name']} ถูกถอนกลับ ({self._title_staff(up['submission_id'])[0]})", [self._title_staff(up["submission_id"])[1]], None)
+
+    def delete_submission(self, sid: int, force: bool = False) -> list[str]:
+        """Delete a request with everything in it. Without force, refused once any document was sent or approved. Returns files to remove."""
+        with self._db() as db:
+            row = db.execute("SELECT current_step FROM submissions WHERE id = ?", (sid,)).fetchone()
+            if not row:
+                raise KeyError(sid)
+            ups = [self._upload(r) for r in db.execute("SELECT * FROM uploads WHERE submission_id = ?", (sid,))]
+            if not force and (row["current_step"] or any(u["status"] in ("sent", "approved") for u in ups)):
+                raise ValueError("documents were already sent")
+            for t in ("uploads", "step_events", "submission_researchers", "notifications"):
+                db.execute(f"DELETE FROM {t} WHERE submission_id = ?", (sid,))
+            db.execute("DELETE FROM submissions WHERE id = ?", (sid,))
+        return [p for u in ups for p in [u["path"], *[a["value"]["path"] for a in u["answers"] if isinstance(a["value"], dict)]] if p]
+
     def latest_uploads(self, sid: int, step_index: int) -> dict[str, dict]:
         """Newest upload per document name for one step; older ones stay as history."""
         with self._db() as db:

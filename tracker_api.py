@@ -186,6 +186,19 @@ def _progress(request: Request, work):
     return StreamingResponse(events(), media_type="application/x-ndjson", headers={"X-Accel-Buffering": "no"})
 
 
+def _type_name(path: Path, filename: str) -> str:
+    """A short name for a new type: the AI reads the start of the guide; if it gives nothing, the file name without its extension and brackets."""
+    stem = re.sub(r"\s*[(\[].*?[)\]]", "", Path(filename).stem).replace("_", " ").strip() or "ประเภทงานใหม่"
+    try:
+        text = " ".join(extract_pages(path))[:1500]
+        out = llm([{"role": "user", "content": "ตั้งชื่อประเภทงานสั้นๆ ไม่เกิน 60 ตัวอักษร (เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง) จากเอกสารนี้ "
+                    "ตอบเฉพาะชื่อ ไม่ต้องมีเครื่องหมายคำพูดหรือคำอธิบาย ไม่ใส่นามสกุลไฟล์\n\n" + text}])
+        name = out.strip().splitlines()[0].strip(" \"'“”") if out and out.strip() else ""
+        return name[:80] or stem
+    except Exception:
+        return stem
+
+
 def _draft(path: Path, say=lambda text: None) -> list[dict]:
     try:
         say("กำลังอ่านข้อความจากเอกสาร")
@@ -210,7 +223,7 @@ def types(_: User = Depends(require_staff)):
 
 
 @router.post("/types")
-def create_type(request: Request, name: str = Form(...), file: UploadFile = File(...), _: User = Depends(require_staff)):
+def create_type(request: Request, name: str = Form(""), file: UploadFile = File(...), _: User = Depends(require_staff)):
     path = _save_upload(file, "types")
 
     def work(say):
@@ -219,8 +232,12 @@ def create_type(request: Request, name: str = Form(...), file: UploadFile = File
         except HTTPException:
             path.unlink(missing_ok=True)
             raise
+        title = name.strip()
+        if not title:
+            say("AI กำลังตั้งชื่อประเภทงานจากเอกสาร")
+            title = _type_name(path, file.filename or "")
         say("กำลังบันทึกฉบับร่าง")
-        return {"version_id": state.get_tracker().create_type(name, steps, str(path)), "steps": steps}
+        return {"version_id": state.get_tracker().create_type(title, steps, str(path)), "steps": steps, "name": title}
     return _progress(request, work)
 
 
@@ -545,6 +562,33 @@ def edit_form(type_id: int, body: FormIn, _: User = Depends(require_staff)):
 def approve_form(type_id: int, body: FormRef, _: User = Depends(require_staff)):
     if not state.get_tracker().approve_form(type_id, body.doc_name):
         raise HTTPException(404, "draft a form first")
+    return {"ok": True}
+
+
+@router.post("/uploads/{uid}/withdraw")
+def withdraw(uid: int, user: User = Depends(current_user)):
+    tk = state.get_tracker()
+    up = tk.get_upload(uid)
+    if up is None:
+        raise HTTPException(404, "not found")
+    _own_submission(up["submission_id"], user)
+    try:
+        tk.withdraw_upload(uid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"status": "screened"}
+
+
+@router.delete("/submissions/{sid}")
+def delete_submission(sid: int, user: User = Depends(current_user)):
+    """The researcher cancels their own request until a document is sent; the staff in charge may delete it at any time."""
+    _own_submission(sid, user)
+    try:
+        files = state.get_tracker().delete_submission(sid, force=user.role == "staff")
+    except ValueError:
+        raise HTTPException(409, "ส่งเอกสารแล้ว ยกเลิกเองไม่ได้ ติดต่อเจ้าหน้าที่")
+    for f in files:
+        Path(f).unlink(missing_ok=True)
     return {"ok": True}
 
 
