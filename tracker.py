@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS forms (
 CREATE TABLE IF NOT EXISTS uploads (
     id INTEGER PRIMARY KEY, submission_id INTEGER NOT NULL REFERENCES submissions(id), step_index INTEGER NOT NULL,
     doc_name TEXT NOT NULL, filename TEXT NOT NULL, path TEXT NOT NULL, findings TEXT NOT NULL, status TEXT NOT NULL,
-    dismissed TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', reviewed_by TEXT,
+    dismissed TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', reviewed_by TEXT, answers TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
 UPLOAD_STATUSES = {"screened", "cannot_check", "sent", "approved", "returned"}
@@ -40,14 +40,34 @@ def validate_steps(steps) -> list:
     return steps
 
 
-def validate_form(title: str, fields: list, allow_empty: bool = False) -> None:
+FIELD_TYPES = ("text", "longtext", "number", "date", "choice", "file")
+
+
+def validate_form(title: str, fields: list) -> list:
+    """Checks a form and returns its fields in full shape: key, label, hint, type, required, options. Keys stay stable when staff edit labels."""
     if not isinstance(title, str) or not title.strip():
         raise ValueError("form needs a title")
-    if not isinstance(fields, list) or (not fields and not allow_empty) or len(fields) > 60:
+    if not isinstance(fields, list) or not fields or len(fields) > 60:
         raise ValueError("form needs 1 to 60 fields")
+    out, keys = [], set()
     for f in fields:
         if not isinstance(f, dict) or not isinstance(f.get("label"), str) or not f["label"].strip() or not isinstance(f.get("hint", ""), str):
             raise ValueError("every field needs a label")
+        kind = f.get("type") or "text"
+        if kind not in FIELD_TYPES:
+            raise ValueError("unknown field type: " + str(kind))
+        options = [o.strip() for o in f.get("options") or [] if isinstance(o, str) and o.strip()] if kind == "choice" else []
+        if kind == "choice" and len(options) < 2:
+            raise ValueError("a choice field needs at least 2 options")
+        key = f.get("key") if isinstance(f.get("key"), str) and f["key"] and f["key"] not in keys else None
+        n = len(out) + 1
+        while key is None:
+            if f"f{n}" not in keys:
+                key = f"f{n}"
+            n += 1
+        keys.add(key)
+        out.append({"key": key, "label": f["label"].strip(), "hint": f.get("hint", "").strip(), "type": kind, "required": bool(f.get("required")), "options": options})
+    return out
 
 
 class Tracker:
@@ -59,6 +79,8 @@ class Tracker:
             for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
                 if col not in have:
                     db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
+            if "answers" not in {r["name"] for r in db.execute("PRAGMA table_info(uploads)")}:
+                db.execute("ALTER TABLE uploads ADD COLUMN answers TEXT NOT NULL DEFAULT '[]'")
 
     def _db(self) -> sqlite3.Connection:  # one connection per call, so request threads never share one
         db = sqlite3.connect(self.path)
@@ -124,12 +146,12 @@ class Tracker:
     def _form(row) -> dict:
         return {**dict(row), "fields": json.loads(row["fields"])}
 
-    def put_form(self, type_id: int, doc_name: str, title: str, fields: list, status: str = "draft", file_path: str = "") -> None:
+    def put_form(self, type_id: int, doc_name: str, title: str, fields: list, status: str = "draft") -> None:
         """Insert or replace the form of one document of a type."""
-        validate_form(title, fields, allow_empty=bool(file_path))
+        fields = validate_form(title, fields)
         with self._db() as db:
-            db.execute("INSERT OR REPLACE INTO forms (type_id, doc_name, title, fields, status, file_path) VALUES (?, ?, ?, ?, ?, ?)",
-                       (type_id, doc_name, title.strip(), json.dumps(fields, ensure_ascii=False), status, file_path))
+            db.execute("INSERT OR REPLACE INTO forms (type_id, doc_name, title, fields, status) VALUES (?, ?, ?, ?, ?)",
+                       (type_id, doc_name, title.strip(), json.dumps(fields, ensure_ascii=False), status))
 
     def get_form(self, type_id: int, doc_name: str) -> dict | None:
         with self._db() as db:
@@ -218,16 +240,16 @@ class Tracker:
                        (sid, row["current_step"], to_step, staff_id, note))
 
     # ---- uploads ----
-    def add_upload(self, sid: int, step_index: int, doc_name: str, filename: str, path: str, findings: list | None, status: str) -> int:
+    def add_upload(self, sid: int, step_index: int, doc_name: str, filename: str, path: str, findings: list | None, status: str, answers: list | None = None) -> int:
         if status not in UPLOAD_STATUSES:
             raise ValueError("bad upload status")
         with self._db() as db:
-            return db.execute("INSERT INTO uploads (submission_id, step_index, doc_name, filename, path, findings, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                              (sid, step_index, doc_name, filename, path, json.dumps(findings or [], ensure_ascii=False), status)).lastrowid
+            return db.execute("INSERT INTO uploads (submission_id, step_index, doc_name, filename, path, findings, status, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                              (sid, step_index, doc_name, filename, path, json.dumps(findings or [], ensure_ascii=False), status, json.dumps(answers or [], ensure_ascii=False))).lastrowid
 
     @staticmethod
     def _upload(row) -> dict:
-        return {**dict(row), "findings": json.loads(row["findings"]), "dismissed": json.loads(row["dismissed"])}
+        return {**dict(row), "findings": json.loads(row["findings"]), "dismissed": json.loads(row["dismissed"]), "answers": json.loads(row["answers"])}
 
     def get_upload(self, upload_id: int) -> dict | None:
         with self._db() as db:

@@ -1,9 +1,8 @@
 """Tracking dashboard API: mock login, submissions, step moves. Rules live in tracker.py; this only maps users and HTTP."""
-import io
+import json
 import re
 import secrets
 from pathlib import Path
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -14,8 +13,8 @@ from auth import User, authenticate, current_user, require_staff, session_value
 from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
 from extract import extract_pages, extract_text
 from rag import chat as llm
-from forms_ai import build_docx, draft_form
-from steps_ai import draft_steps, find_template, screen_document
+from forms_ai import draft_form
+from steps_ai import draft_steps, screen_document
 
 router = APIRouter(prefix="/api/track")
 
@@ -82,8 +81,13 @@ def submission(sid: int, user: User = Depends(current_user)):
     sub = state.get_tracker().get_submission(sid, user.id, user.role)
     if sub is None:  # missing and not-yours look the same
         raise HTTPException(404, "not found")
-    docs = [d for st in sub["steps"] for d in st["documents"]]
-    return {**sub, "forms": [d for d in docs if _blank_form(sub["type_id"], d)]}
+    forms = {}
+    for st in sub["steps"]:
+        for d in st["documents"]:
+            f = state.get_tracker().get_form(sub["type_id"], d)
+            if f and f["status"] == "approved":
+                forms[d] = {"title": f["title"], "fields": f["fields"]}
+    return {**sub, "forms": forms, "uploads": [_public(u) for u in sub["uploads"]]}
 
 
 @router.post("/submissions")
@@ -112,11 +116,11 @@ def move(sid: int, body: MoveIn, user: User = Depends(require_staff)):
 UPLOAD_EXTS = {".pdf", ".docx"}
 
 
-def _save_upload(file: UploadFile, subdir: str) -> Path:
+def _save_upload(file: UploadFile, subdir: str, exts=None) -> Path:
     """Checks type and size, then stores under UPLOAD_DIR/subdir with a sanitized, unique name."""
     name = re.sub(r"[^\w.\-]", "_", Path(file.filename or "").name)  # drops any directory part
-    if Path(name).suffix.lower() not in UPLOAD_EXTS:
-        raise HTTPException(400, "only .pdf and .docx files are accepted")
+    if Path(name).suffix.lower() not in (exts or UPLOAD_EXTS):
+        raise HTTPException(400, "only " + ", ".join(sorted(exts or UPLOAD_EXTS)) + " files are accepted")
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "file too large")
@@ -250,16 +254,6 @@ def _own_submission(sid: int, user: User) -> dict:
     return sub
 
 
-def _reference_text(type_id: int, doc: str) -> str | None:
-    """What the checker compares an upload with: the approved form's fields or file, else a template file."""
-    f = _blank_form(type_id, doc)
-    if f is None:
-        return None
-    if f["file_path"]:
-        return extract_text(Path(f["file_path"]))
-    return f["title"] + "\n" + "\n".join(x["label"] + (f" ({x['hint']})" if x.get("hint") else "") for x in f["fields"])
-
-
 @router.post("/submissions/{sid}/uploads")
 def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), user: User = Depends(current_user)):
     sub = _own_submission(sid, user)
@@ -267,16 +261,15 @@ def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), us
     if n >= sub["step_count"]:
         raise HTTPException(400, "submission is already complete")
     step = sub["steps"][n]
-    if doc_name not in step["documents"]:
-        raise HTTPException(400, "not a document of the current step")
-    if any(u["doc_name"] == doc_name and u["status"] in ("sent", "approved") for u in sub["uploads"]):
-        raise HTTPException(400, "document is already with staff or approved")
+    _check_slot(sub, step, doc_name)
+    if _approved_form(sub["type_id"], doc_name):
+        raise HTTPException(400, "this document is filled in on the website, not uploaded")
     path = _save_upload(file, f"submissions/{sid}")
     findings, status = None, "cannot_check"  # a failed check never blocks sending
     try:
         text = extract_text(path)
         if text:
-            findings = screen_document(text, step, doc_name, _reference_text(sub["type_id"], doc_name), llm=llm)
+            findings = screen_document(text, step, doc_name, None, llm=llm)
             status = "screened"
     except Exception:  # unreadable file or bad model output: report "cannot check", keep the upload
         findings, status = None, "cannot_check"
@@ -288,32 +281,93 @@ def _doc_step(sub_or_version: dict, doc: str) -> dict | None:
     return next((s for s in sub_or_version["steps"] if doc in s["documents"]), None)
 
 
-def _blank_form(type_id: int, doc: str):
-    """Approved staff form first, then a file in the Form template folder. None when the researcher has nothing to download."""
+def _approved_form(type_id: int, doc: str) -> dict | None:
     f = state.get_tracker().get_form(type_id, doc)
-    if f and f["status"] == "approved":
-        return f
-    tpl = find_template(doc)
-    return {"file_path": str(tpl), "title": doc, "fields": [], "status": "approved"} if tpl else None
+    return f if f and f["status"] == "approved" else None
 
 
-@router.get("/submissions/{sid}/form")
-def blank_form(sid: int, doc: str, user: User = Depends(current_user)):
-    sub = state.get_tracker().get_submission(sid, user.id, user.role)
-    if sub is None:
-        raise HTTPException(404, "not found")
-    if _doc_step(sub, doc) is None:
-        raise HTTPException(400, "not a document of this submission")
-    f = _blank_form(sub["type_id"], doc)
-    if f is None:
-        raise HTTPException(404, "no approved form for this document")
-    name = re.sub(r'[\\/:*?"<>|]', "_", doc)  # keep Thai vowel marks, drop only characters a file name cannot hold
-    if f["file_path"]:
-        return FileResponse(f["file_path"], filename=name + Path(f["file_path"]).suffix)
-    buf = io.BytesIO()
-    build_docx(f, buf)
-    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(name)}.docx"})
+def _check_slot(sub: dict, step: dict, doc_name: str) -> None:
+    if doc_name not in step["documents"]:
+        raise HTTPException(400, "not a document of the current step")
+    if any(u["doc_name"] == doc_name and u["status"] in ("sent", "approved") for u in sub["uploads"]):
+        raise HTTPException(400, "document is already with staff or approved")
+
+
+ATTACH_EXTS = UPLOAD_EXTS | {".jpg", ".jpeg", ".png"}  # a scanned receipt or signed page is often a photo
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _answers(form: dict, raw: dict, files: dict, prev: list, sid: int) -> list:
+    """Checks the researcher's answers against the approved form. Returns a snapshot (label and type included) so later form edits never change what staff review."""
+    old = {a["key"]: a["value"] for a in prev}
+    out = []
+    for f in form["fields"]:
+        k, kind, v = f["key"], f["type"], raw.get(f["key"])
+        if kind == "file":
+            if k in files:
+                path = _save_upload(files[k], f"submissions/{sid}", ATTACH_EXTS)
+                v = {"name": files[k].filename or path.name, "path": str(path)}
+            else:
+                v = old.get(k) if isinstance(old.get(k), dict) else None
+        else:
+            v = v.strip() if isinstance(v, str) else ("" if v is None else str(v))
+            if v and kind == "number":
+                try:
+                    float(v)
+                except ValueError:
+                    raise HTTPException(400, f"{f['label']}: ต้องเป็นตัวเลข")
+            if v and kind == "date" and not DATE_RE.match(v):
+                raise HTTPException(400, f"{f['label']}: รูปแบบวันที่ไม่ถูกต้อง")
+            if v and kind == "choice" and v not in f["options"]:
+                raise HTTPException(400, f"{f['label']}: เลือกได้เฉพาะตัวเลือกที่กำหนด")
+        if f["required"] and not v:
+            raise HTTPException(400, f"กรุณากรอก: {f['label']}")
+        out.append({"key": k, "label": f["label"], "type": kind, "value": v})
+    return out
+
+
+def _answers_text(title: str, answers: list) -> str:
+    lines = [title]
+    for a in answers:
+        v = a["value"]
+        if isinstance(v, dict):
+            try:
+                body = extract_text(Path(v["path"]))[:2000]
+            except Exception:
+                body = ""
+            v = f"(ไฟล์แนบ: {v['name']})" + (f"\n{body}" if body else "")
+        lines.append(f"{a['label']}: {v or '(ว่าง)'}")
+    return "\n".join(lines)
+
+
+@router.post("/submissions/{sid}/forms")
+def submit_form(sid: int, doc_name: str = Form(...), answers: str = Form("{}"), file_keys: list[str] = Form([]), files: list[UploadFile] = File([]),
+                user: User = Depends(current_user)):
+    """Researcher fills the online form of a document. Saving again replaces the earlier answers until the document is sent."""
+    sub = _own_submission(sid, user)
+    n = sub["current_step"]
+    if n >= sub["step_count"]:
+        raise HTTPException(400, "submission is already complete")
+    step = sub["steps"][n]
+    _check_slot(sub, step, doc_name)
+    form = _approved_form(sub["type_id"], doc_name)
+    if form is None:
+        raise HTTPException(400, "this document has no online form")
+    try:
+        raw = json.loads(answers)
+        assert isinstance(raw, dict)
+    except Exception:
+        raise HTTPException(400, "answers must be a JSON object")
+    prev = next((u["answers"] for u in sorted(sub["uploads"], key=lambda u: -u["id"]) if u["doc_name"] == doc_name), [])
+    snap = _answers(form, raw, dict(zip(file_keys, files)), prev, sid)
+    findings, status = None, "cannot_check"
+    try:
+        findings = screen_document(_answers_text(form["title"], snap), step, doc_name, None, llm=llm)
+        status = "screened"
+    except Exception:
+        findings, status = None, "cannot_check"
+    uid = state.get_tracker().add_upload(sid, n, doc_name, form["title"], "", findings, status, snap)
+    return {"upload_id": uid, "status": status, "findings": findings or []}
 
 
 # ---- staff: draft, edit, approve the blank form of each document of a type ----
@@ -344,14 +398,14 @@ def _known_doc(type_id: int, doc: str) -> tuple[dict, dict]:
 
 @router.get("/types/{type_id}/forms")
 def list_forms(type_id: int, _: User = Depends(require_staff)):
-    return [{k: v for k, v in f.items() if k != "file_path"} | {"has_file": bool(f["file_path"])} for f in state.get_tracker().list_forms(type_id)]
+    return state.get_tracker().list_forms(type_id)
 
 
 @router.post("/types/{type_id}/forms/draft")
 def draft_type_form(type_id: int, body: FormRef, _: User = Depends(require_staff)):
     v, step = _known_doc(type_id, body.doc_name)
     try:
-        form = draft_form(body.doc_name, step, v["type_name"], llm=llm)
+        form = draft_form(body.doc_name, step, v["type_name"], Path(v["source_file"]) if v.get("source_file") else None, llm=llm)
     except Exception as e:  # bad model output or model unreachable: nothing is saved
         raise HTTPException(502, f"could not draft the form: {e}")
     state.get_tracker().put_form(type_id, body.doc_name, form["title"], form["fields"])
@@ -364,7 +418,7 @@ def edit_form(type_id: int, body: FormIn, _: User = Depends(require_staff)):
     tk = state.get_tracker()
     old = tk.get_form(type_id, body.doc_name)
     try:  # an approved form stays approved after an edit: the editor is staff
-        tk.put_form(type_id, body.doc_name, body.title, body.fields, old["status"] if old else "draft", old["file_path"] if old else "")
+        tk.put_form(type_id, body.doc_name, body.title, body.fields, old["status"] if old else "draft")
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
@@ -375,15 +429,6 @@ def approve_form(type_id: int, body: FormRef, _: User = Depends(require_staff)):
     if not state.get_tracker().approve_form(type_id, body.doc_name):
         raise HTTPException(404, "draft a form first")
     return {"ok": True}
-
-
-@router.post("/types/{type_id}/forms/upload")
-def upload_form(type_id: int, doc_name: str = Form(...), file: UploadFile = File(...), _: User = Depends(require_staff)):
-    """An official form file replaces the AI draft and is approved at once: staff supplied it."""
-    _known_doc(type_id, doc_name)
-    path = _save_upload(file, "forms/official")
-    state.get_tracker().put_form(type_id, doc_name, doc_name, [], "approved", str(path))
-    return {"doc_name": doc_name, "status": "approved"}
 
 
 @router.post("/uploads/{uid}/send")
@@ -401,7 +446,9 @@ def send_upload(uid: int, user: User = Depends(current_user)):
 
 
 def _public(up: dict) -> dict:
-    return {k: v for k, v in up.items() if k != "path"}  # server file paths stay on the server
+    """Server file paths stay on the server; a file answer keeps only its name."""
+    answers = [{**a, "value": {"name": a["value"]["name"]}} if isinstance(a["value"], dict) else a for a in up["answers"]]
+    return {**{k: v for k, v in up.items() if k != "path"}, "answers": answers}
 
 
 @router.get("/review-queue")
@@ -428,4 +475,19 @@ def upload_file(uid: int, user: User = Depends(current_user)):
     up = tk.get_upload(uid)
     if up is None or tk.get_submission(up["submission_id"], user.id, user.role) is None:
         raise HTTPException(404, "not found")
+    if not up["path"]:
+        raise HTTPException(404, "this document is a form, not a file")
     return FileResponse(up["path"], filename=up["filename"])
+
+
+@router.get("/uploads/{uid}/answer-file")
+def answer_file(uid: int, key: str, user: User = Depends(current_user)):
+    """A file attached inside a filled form. Same access as the upload itself."""
+    tk = state.get_tracker()
+    up = tk.get_upload(uid)
+    if up is None or tk.get_submission(up["submission_id"], user.id, user.role) is None:
+        raise HTTPException(404, "not found")
+    a = next((a for a in up["answers"] if a["key"] == key and isinstance(a["value"], dict)), None)
+    if a is None:
+        raise HTTPException(404, "not found")
+    return FileResponse(a["value"]["path"], filename=a["value"]["name"])

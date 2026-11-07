@@ -206,3 +206,17 @@ dialog { max-width: calc(100vw - 32px); }
 .checks .check { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: .95rem; cursor: pointer; }
 .actions.end { justify-content: flex-end; }
 @media (max-width: 700px) { .newform { grid-template-columns: 1fr; } }
+
+/* online forms */
+.fillform { display: grid; gap: 14px; margin: 14px 0; }
+.fillform textarea { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; box-sizing: border-box; resize: vertical; }
+.fillform input[type=number], .fillform input[type=date] { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; box-sizing: border-box; }
+.req { color: var(--err); }
+.lbl small { font-size: .8rem; }
+.answers { display: grid; gap: 10px; margin: 12px 0; }
+.answers dt { font-size: .82rem; }
+.answers dd { margin: 0; overflow-wrap: anywhere; }
+.editgrid { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; align-items: start; }
+.fieldedit { display: grid; gap: 8px; padding: 14px 0; border-top: 1px solid var(--line); }
+.fe-top { display: grid; grid-template-columns: 1fr 150px auto; gap: 8px; align-items: center; }
+@media (max-width: 900px) { .editgrid { grid-template-columns: 1fr; } .fe-top { grid-template-columns: 1fr; } }

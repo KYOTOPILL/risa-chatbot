@@ -29,6 +29,7 @@ const ICONS = {
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   chat: "M4 5h16v11H9l-5 4z",
   check: "m5 12 5 5 9-10",
+  form: "M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7",
 };
 function icon(name) {
   const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");
