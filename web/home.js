@@ -143,22 +143,33 @@ async function staffFiles(body) {
 async function staffSubs(body) {
   const [subs, types] = await Promise.all([api("/submissions"), api("/types")]);
   const approved = types.filter((t) => t.status === "approved");
-  const title = h("input", { type: "text", placeholder: "ชื่องาน เช่น ขอทุน CMU - สมชาย หรือ ขอเบิกค่าเดินทาง - นิดา" });
+  const title = h("input", { type: "text", placeholder: "เช่น ขอเบิกค่าเดินทาง - นิดา" });
   const type = h("select", { class: "field" }, approved.map((t) => h("option", { value: t.id }, t.type_name + " (v" + t.version + ")")));
   const researchers = users.filter((u) => u.role === "researcher").map((u) => h("label", { class: "check" }, h("input", { type: "checkbox", value: u.id }), " " + u.name));
   const staffSel = h("select", { class: "field" }, users.filter((u) => u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === me.id }, u.name)));
-  body.append(
-    h("section", { class: "card" }, h("h2", {}, "งานทั้งหมด"),
-      subs.map((s) => h("div", { class: "list-row" },
-        h("span", {}, s.title, " ", h("span", { class: "muted" }, s.type_name + " · ขั้น " + Math.min(s.current_step + 1, s.step_count) + "/" + s.step_count + " · ผู้ดูแล " + s.staff_id + " · นักวิจัย " + s.researcher_ids.join(", "))),
-        h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "เปิด")))),
-    h("section", { class: "card" }, h("h2", {}, "สร้างงานใหม่ให้นักวิจัย"),
-      approved.length ? h("div", { class: "stepedit" }, title, type, h("div", { class: "checks" }, researchers), staffSel,
-        h("button", { class: "primary", type: "button", onclick: act(async () => {
+  const nm = (id) => users.find((u) => u.id === id)?.name || id;
+  const lab = (text, el) => h("label", { class: "lbl" }, h("span", {}, text), el);
+  const progress = (s) => {
+    const done = s.current_step >= s.step_count, n = Math.min(s.current_step + 1, s.step_count);
+    return h("span", { class: "prog" }, h("span", { class: "bar" }, h("i", { style: "width:" + Math.round(100 * (done ? s.step_count : s.current_step) / s.step_count) + "%" })),
+      h("span", { class: "muted" }, done ? "เสร็จสิ้น" : "ขั้น " + n + "/" + s.step_count));
+  };
+  body.append(h("h1", { class: "page-title" }, "ทุกงาน"), h("p", { class: "muted sub" }, subs.length + " งาน"),
+    h("section", { class: "card" },
+      subs.length ? subs.map((s) => h("div", { class: "list-row" },
+        h("span", { class: "grow" }, h("b", {}, s.title), h("span", { class: "muted block" }, s.type_name + " · นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้ดูแล " + nm(s.staff_id))),
+        progress(s),
+        h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "เปิด")))
+        : h("p", { class: "muted" }, "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากงานที่เปิดรับ หรือสร้างให้ด้านล่าง")),
+    h("section", { class: "card" }, h("h2", {}, "สร้างงานให้นักวิจัย"), h("p", { class: "muted sub" }, "ใช้เมื่อต้องการสร้างงานแทนนักวิจัยที่ระบุชื่อ"),
+      approved.length ? h("div", { class: "newform" },
+        lab("ชื่องาน", title), lab("ประเภทงาน", type), lab("ผู้ดูแล", staffSel),
+        h("div", { class: "lbl wide" }, h("span", {}, "นักวิจัย"), h("div", { class: "checks" }, researchers)),
+        h("div", { class: "wide actions end" }, h("button", { class: "primary", type: "button", onclick: act(async () => {
           const ids = [...body.querySelectorAll(".checks input:checked")].map((c) => c.value);
           await api("/submissions", send("POST", { title: title.value.trim(), version_id: +type.value, researcher_ids: ids, staff_id: staffSel.value }));
           staffHome();
-        }) }, "สร้างงาน")) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภทงาน)")));
+        }) }, "สร้างงาน"))) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภทงาน)")));
 }
 
 async function staffDetail(sid) {
