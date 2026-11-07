@@ -24,7 +24,7 @@ async function api(path, opts = {}) {
 const send = (method, body) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const form = (fields) => { const f = new FormData(); for (const [k, v] of Object.entries(fields)) f.append(k, v); return { method: "POST", body: f }; };
 
-const STATUS = { screened: "AI ตรวจแล้ว", cannot_check: "AI ตรวจไม่ได้ (ยังส่งได้)", sent: "รอเจ้าหน้าที่ตรวจ", approved: "อนุมัติแล้ว", returned: "ส่งกลับให้แก้ไข" };
+const STATUS = { screened: "AI ตรวจสอบแล้ว", cannot_check: "AI ตรวจสอบไม่ได้ (ยังส่งได้)", sent: "รอเจ้าหน้าที่ตรวจสอบ", approved: "อนุมัติแล้ว", returned: "ส่งกลับให้แก้ไข" };
 const KIND = { missing: "ขาดหายไป", incorrect: "อาจไม่ถูกต้อง", unclear: "ไม่ชัดเจน" };
 const ROLE = { researcher: "นักวิจัย", staff: "เจ้าหน้าที่" };
 
@@ -73,7 +73,7 @@ function docRow(sub, name, reload) {
     await api("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }));
     reload();
   }) });
-  const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจ") : null;
+  const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจสอบ") : null;
   return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"),
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)")) : null,
@@ -86,17 +86,17 @@ function subCard(sub) {
   const step = sub.steps[sub.current_step];
   const staff = users.find((u) => u.id === sub.staff_id);
   return h("section", { class: "card", id: "sub-" + sub.id },
-    h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · เจ้าหน้าที่ผู้ดูแล: " + (staff ? staff.name : sub.staff_id)), stepper(sub),
+    h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · เจ้าหน้าที่ผู้รับผิดชอบ: " + (staff ? staff.name : sub.staff_id)), stepper(sub),
     step ? h("div", {}, h("h3", {}, "เอกสารสำหรับขั้นตอนนี้"),
       step.documents.length ? step.documents.map((name) => docRow(sub, name, () => researcherHome().catch(fail))) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
-      : h("p", {}, "งานนี้เสร็จสิ้นแล้ว"));
+      : h("p", {}, "ดำเนินการเสร็จสิ้น"));
 }
 
 function openPosts(posts, subs) {
   if (!posts.length) return null;
   return h("section", { class: "card" }, h("h2", {}, "งานที่เปิดรับ"), h("p", { class: "muted" }, "เลือกงานที่ต้องการส่ง ระบบจะสร้างงานของคุณเอง"),
     posts.map((p) => h("div", { class: "list-row" },
-      h("span", {}, h("b", {}, p.type_name), " ", h("span", { class: "muted" }, p.steps.length + " ขั้นตอน · เอกสาร: " + ([...new Set(p.steps.flatMap((s) => s.documents))].join(", ") || "ไม่มี") + " · ผู้ดูแล " + p.owner_name)),
+      h("span", {}, h("b", {}, p.type_name), " ", h("span", { class: "muted" }, p.steps.length + " ขั้นตอน · เอกสาร: " + ([...new Set(p.steps.flatMap((s) => s.documents))].join(", ") || "ไม่มี") + " · ผู้รับผิดชอบ " + p.owner_name)),
       (() => {
         const mine = subs.find((s) => s.type_id === p.type_id), go = (id) => document.getElementById("sub-" + id)?.scrollIntoView({ behavior: "smooth" });
         return mine ? h("button", { class: "ghost", type: "button", onclick: () => go(mine.id) }, "ไปที่งานของฉัน")
@@ -112,7 +112,7 @@ async function researcherHome() {
     h("section", { class: "card" }, h("h2", {}, "สิ่งที่ต้องทำ"),
       todo.length ? todo.map((t) => h("div", { class: "todo " + t.kind },
         h("span", {}, h("b", {}, t.sub.title), " · ", t.doc, " ",
-          t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)")) : h("span", { class: "muted" }, "รอเจ้าหน้าที่ตรวจ")),
+          t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)")) : h("span", { class: "muted" }, "รอเจ้าหน้าที่ตรวจสอบ")),
         h("button", { class: "ghost", type: "button", onclick: () => document.getElementById("sub-" + t.sub.id).scrollIntoView({ behavior: "smooth" }) }, "ไปที่งานนี้")))
         : h("p", { class: "muted" }, "ไม่มีงานค้าง")),
     openPosts(posts, subs),
@@ -125,7 +125,7 @@ let filesRoot = null, filesTab = null;  // the file manager: built once, kept in
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
-  const items = [["queue", "queue", "รอตรวจ", queue.length], ["subs", "list", "ทุกงาน"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "เอกสารสำหรับแชท"]];
+  const items = [["queue", "queue", "รอตรวจสอบ", queue.length], ["subs", "list", "งานทั้งหมด"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "คลังเอกสาร"]];
   const body = h("div", { class: "ws-main" });
   const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; staffHome(); } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
@@ -153,19 +153,19 @@ async function staffSubs(body) {
   const progress = (s) => {
     const done = s.current_step >= s.step_count, n = Math.min(s.current_step + 1, s.step_count);
     return h("span", { class: "prog" }, h("span", { class: "bar" }, h("i", { style: "width:" + Math.round(100 * (done ? s.step_count : s.current_step) / s.step_count) + "%" })),
-      h("span", { class: "muted" }, done ? "เสร็จสิ้น" : "ขั้น " + n + "/" + s.step_count));
+      h("span", { class: "muted" }, done ? "ดำเนินการเสร็จสิ้น" : "ขั้นตอน " + n + "/" + s.step_count));
   };
-  body.append(h("h1", { class: "page-title" }, "ทุกงาน"), h("p", { class: "muted sub" }, subs.length + " งาน"),
+  body.append(h("h1", { class: "page-title" }, "งานทั้งหมด"), h("p", { class: "muted sub" }, subs.length + " รายการ"),
     h("section", { class: "card" },
       subs.length ? subs.map((s) => h("div", { class: "list-row" },
-        h("span", { class: "grow" }, h("b", {}, s.title), h("span", { class: "muted block" }, s.type_name + " · นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้ดูแล " + nm(s.staff_id))),
+        h("span", { class: "grow" }, h("b", {}, s.title), h("span", { class: "muted block" }, s.type_name + " · นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้รับผิดชอบ " + nm(s.staff_id))),
         progress(s),
-        h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "เปิด")))
-        : h("p", { class: "muted" }, "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากงานที่เปิดรับ หรือสร้างให้ด้านล่าง")),
-    h("section", { class: "card" }, h("h2", {}, "สร้างงานให้นักวิจัย"), h("p", { class: "muted sub" }, "ใช้เมื่อต้องการสร้างงานแทนนักวิจัยที่ระบุชื่อ"),
+        h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "ดูรายละเอียด")))
+        : h("p", { class: "muted" }, "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากงานที่เปิดรับงาน หรือสร้างให้ด้านล่าง")),
+    h("section", { class: "card" }, h("h2", {}, "สร้างงานใหม่ให้นักวิจัย"), h("p", { class: "muted sub" }, "สร้างงานในนามนักวิจัยที่เลือก"),
       approved.length ? h("div", { class: "newform" },
-        lab("ชื่องาน", title), lab("ประเภทงาน", type), lab("ผู้ดูแล", staffSel),
-        h("div", { class: "lbl wide" }, h("span", {}, "นักวิจัย"), h("div", { class: "checks" }, researchers)),
+        lab("ชื่องาน", title), lab("ประเภทงาน", type), lab("ผู้รับผิดชอบ", staffSel),
+        h("div", { class: "lbl wide" }, h("span", {}, "เลือกนักวิจัย"), h("div", { class: "checks" }, researchers)),
         h("div", { class: "wide actions end" }, h("button", { class: "primary", type: "button", onclick: act(async () => {
           const ids = [...body.querySelectorAll(".checks input:checked")].map((c) => c.value);
           await api("/submissions", send("POST", { title: title.value.trim(), version_id: +type.value, researcher_ids: ids, staff_id: staffSel.value }));
@@ -178,19 +178,19 @@ async function staffDetail(sid) {
   const mine = sub.staff_id === me.id;
   const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); staffDetail(sid); });
   show(h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"),
-    h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · ผู้ดูแล " + sub.staff_id + " · นักวิจัย " + sub.researcher_ids.join(", ")), stepper(sub),
+    h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · ผู้รับผิดชอบ " + sub.staff_id + " · นักวิจัย " + sub.researcher_ids.join(", ")), stepper(sub),
       h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
         h("button", { class: "primary", type: "button", disabled: !mine || sub.current_step >= sub.step_count, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
-        mine ? null : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้ดูแลเท่านั้นที่แก้ไขได้"))),
+        mine ? null : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้รับผิดชอบเท่านั้นที่แก้ไขได้"))),
     h("section", { class: "card" }, h("h2", {}, "ประวัติ"), sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + e.staff_id + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน")));
 }
 
 async function staffQueue(body, q, subs) {
   const now = new Date().toISOString(), st = staffStats(q, subs, now);
   const stat = (n, label) => h("div", { class: "stat" }, h("b", {}, String(n)), h("span", {}, label));
-  body.append(...[h("h1", { class: "page-title" }, "เอกสารรอตรวจ"), h("p", { class: "muted sub" }, "เรียงจากส่งมาก่อน"),
-    q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจ"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจเกิน 7 วัน")) : null,
+  body.append(...[h("h1", { class: "page-title" }, "เอกสารรอตรวจสอบ"), h("p", { class: "muted sub" }, "เรียงตามวันที่ส่ง (เก่าสุดก่อน)"),
+    q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจสอบ"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจสอบเกิน 7 วัน")) : null,
     q.length ? h("div", {}, q.map((u) => {
     const dismissed = new Set();
     const note = h("input", { type: "text", placeholder: "หมายเหตุถึงนักวิจัย (ไม่บังคับ)" });
@@ -200,16 +200,16 @@ async function staffQueue(body, q, subs) {
       h("input", { type: "checkbox", checked: dismissed.has(i), onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }), " ", h("b", {}, KIND[f.kind]), " · ", f.text, " ", h("span", { class: "muted" }, "(ติ๊ก = ปัดตก)"))));
     draw();
     const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); staffHome(); });
-    const ai = u.findings.length ? h("span", { class: "badge warn" }, "AI พบ " + u.findings.length + " ข้อ") : h("span", { class: "badge ok" }, "AI ไม่พบข้อสังเกต (หรือตรวจไม่ได้)");
+    const ai = u.findings.length ? h("span", { class: "badge warn" }, "AI พบ " + u.findings.length + " ข้อ") : h("span", { class: "badge ok" }, "AI ไม่พบข้อสังเกต (หรือตรวจสอบไม่ได้)");
     return h("div", { class: "doc" }, h("div", { class: "between" }, h("span", {}, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, "· " + u.submission_title)), ai),
-      h("p", { class: "muted sub" }, "ผู้ดูแล " + u.staff_id + " · ส่ง " + agoText(u.created, now)), " ",
+      h("p", { class: "muted sub" }, "ผู้รับผิดชอบ " + u.staff_id + " · ส่ง " + agoText(u.created, now)), " ",
       u.answers.length ? answersView(u) : h("a", { href: "/api/track/uploads/" + u.id + "/file", target: "_blank" }, "เปิดไฟล์ " + u.filename),
       list, note,
       h("div", { class: "actions" },
         h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
         h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
-        mine ? null : h("span", { class: "muted" }, "เฉพาะผู้ดูแลเท่านั้น")));
-  })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ไม่มีเอกสารรอตรวจ"), h("p", { class: "muted" }, "เมื่อนักวิจัยกดส่งเอกสาร จะแสดงที่นี่"))].filter(Boolean));
+        mine ? null : h("span", { class: "muted" }, "เฉพาะผู้รับผิดชอบเท่านั้น")));
+  })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ยังไม่มีเอกสารรอตรวจสอบ"), h("p", { class: "muted" }, "เมื่อมีนักวิจัยส่งเอกสารเพื่อตรวจสอบ รายการจะแสดงที่นี่"))].filter(Boolean));
 }
 
 async function staffTypes(body) {
@@ -225,25 +225,25 @@ async function staffTypes(body) {
   }) });
   const counts = Object.fromEntries(await Promise.all(types.filter((t) => t.status === "approved").map(async (t) => {
     const by = await formsByDoc(t), docs = docsOf(t);
-    return [t.id, docs.length ? "ฟอร์ม " + docs.filter((d) => by[d]?.status === "approved").length + "/" + docs.length + " พร้อม" : "ไม่มีเอกสาร"];
+    return [t.id, docs.length ? "แบบฟอร์มพร้อมใช้งาน " + docs.filter((d) => by[d]?.status === "approved").length + "/" + docs.length : "ไม่มีเอกสาร"];
   })));
-  body.append(h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "ขั้นตอน เอกสาร แบบฟอร์ม และการเปิดรับของแต่ละประเภทงาน อยู่ในหน้าเดียวกัน"),
+  body.append(h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "จัดการขั้นตอน เอกสาร แบบฟอร์ม และสถานะการเปิดรับงานได้ในที่เดียว"),
     h("section", { class: "card" }, types.length ? types.map((t) => h("div", { class: "list-row" },
       h("span", { class: "grow" }, h("b", {}, t.type_name), " ", h("span", { class: "muted" }, "v" + t.version),
         h("span", { class: "muted block" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : t.steps.length + " ขั้นตอน · " + counts[t.id])),
-      t.status === "approved" && t.open ? h("span", { class: "badge ok" }, "เปิดรับ") : null,
-      t.status === "draft" ? h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจและอนุมัติ")
+      t.status === "approved" && t.open ? h("span", { class: "badge ok" }, "เปิดรับงาน") : null,
+      t.status === "draft" ? h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจสอบและอนุมัติ")
         : h("button", { class: "ghost", type: "button", onclick: () => { openType = t.type_id; staffHome(); } }, "จัดการ")))
       : h("p", { class: "muted" }, "ยังไม่มีประเภทงาน อัปโหลดคู่มือด้านล่างเพื่อเริ่ม")),
-    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI จะร่างขั้นตอนและเอกสารที่ต้องส่งให้ตรวจก่อนใช้งานจริง"), name,
-      h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารและให้ AI ร่างขั้นตอน"))));
+    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI ช่วยร่างขั้นตอนและเอกสารที่ต้องส่ง เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งาน"), name,
+      h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารเพื่อให้ AI ร่างขั้นตอน"))));
 }
 
 // one page per type: steps and documents, forms, and the post (open for researchers)
 async function typePage(body, t) {
   const steps = h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, "ขั้นตอนและเอกสาร"), newVersionButton(t)),
     h("ol", { class: "steplist" }, t.steps.map((s) => h("li", {}, h("b", {}, s.title), h("span", { class: "muted block" }, s.documents.length ? "เอกสาร: " + s.documents.join(", ") : "ไม่ต้องส่งเอกสาร")))));
-  const post = h("section", { class: "card" }, h("h2", {}, "เปิดรับ"), h("p", { class: "muted sub" }, "เมื่อเปิดรับ นักวิจัยทุกคนเห็นงานนี้และกดเริ่มส่งเองได้ ผู้ดูแลคือเจ้าหน้าที่ที่เลือก"), postControls(t));
+  const post = h("section", { class: "card" }, h("h2", {}, "เปิดรับงาน"), h("p", { class: "muted sub" }, "เมื่อเปิดรับงาน นักวิจัยทุกคนเห็นงานนี้และกดเริ่มส่งเองได้ ผู้รับผิดชอบคือเจ้าหน้าที่ที่เลือก"), postControls(t));
   body.append(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: () => { openType = null; staffHome(); } }, "← ประเภทงานทั้งหมด")),
     h("h1", { class: "page-title" }, t.type_name), h("p", { class: "muted sub" }, "v" + t.version + " · ใช้งานอยู่"), steps, await formsSection(t), post);
 }
@@ -252,11 +252,11 @@ async function typePage(body, t) {
 function postControls(t) {
   const staff = users.filter((u) => u.role === "staff");
   const publish = (owner) => api("/types/" + t.type_id + "/publish", send("POST", owner ? { owner_id: owner } : {}));
-  const owner = h("select", { class: "field", "aria-label": "ผู้ดูแลงานนี้", onchange: act(async (ev) => { await publish(ev.target.value); staffHome(); }) },
-    staff.map((u) => h("option", { value: u.id, selected: u.id === t.owner_id }, "ผู้ดูแล " + u.name)));
+  const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await publish(ev.target.value); staffHome(); }) },
+    staff.map((u) => h("option", { value: u.id, selected: u.id === t.owner_id }, "ผู้รับผิดชอบ " + u.name)));
   return t.open
-    ? h("span", { class: "tools" }, h("span", { class: "badge ok" }, "เปิดรับ"), owner, h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/close", { method: "POST" }); staffHome(); }) }, "ปิดรับ"))
-    : h("button", { class: "ghost", type: "button", onclick: act(async () => { await publish(); staffHome(); }) }, "เปิดรับ");
+    ? h("span", { class: "tools" }, h("span", { class: "badge ok" }, "เปิดรับงาน"), owner, h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/close", { method: "POST" }); staffHome(); }) }, "ปิดรับงาน"))
+    : h("button", { class: "ghost", type: "button", onclick: act(async () => { await publish(); staffHome(); }) }, "เปิดรับงาน");
 }
 
 function newVersionButton(t) {
@@ -300,7 +300,7 @@ document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") document
 
 function chatDrawer() {
   removeChat();  // two overlapping logins must not leave two drawers
-  const frame = h("iframe", { class: "chat-frame", title: "แชทผู้ช่วย RiSA" });
+  const frame = h("iframe", { class: "chat-frame", title: "ผู้ช่วย AI ของ RiSA" });
   const panel = h("aside", { class: "chat-drawer", id: "chat-drawer", hidden: true },
     h("div", { class: "chat-head" }, h("b", {}, "ถาม AI"), h("button", { class: "ghost", type: "button", "aria-label": "ปิดแชท", onclick: () => toggle(false) }, "×")), frame);
   const fab = h("button", { class: "primary chat-fab", id: "chat-fab", type: "button", onclick: () => toggle(true) }, icon("chat"), "ถาม AI");

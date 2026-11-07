@@ -2,7 +2,7 @@
 // Wrapped in a function so its names cannot clash with home.js.
 function mountFiles() {
 const $ = (id) => document.getElementById(id);
-const SHARE = "shareable", ROOT_LABEL = "เอกสารทั้งหมด";
+const SHARE = "shareable", ROOT_LABEL = "คลังเอกสาร";
 let files = [], folders = [], cwd = "", selected = new Set(), dragging = [];
 let poll, idx = { state: "ok", skipped: [] }, note = null;  // idx: server index status; note: { text, err } of a failed admin action
 let pending = null;  // delete waiting out its undo window: { paths, timer }
@@ -21,11 +21,11 @@ function say(text, err = false) { note = { text, err }; renderIndex(); }
 // index strip: green = chat sees the latest files, amber = changes waiting, spinner = updating. The server debounces and re-indexes; this only shows its status.
 function renderIndex() {
   const box = $("index"), pill = el("span", { className: "pill" }), s = idx.state;
-  const text = note?.text || (s === "error" ? idx.error : s === "busy" ? "กำลังอัปเดตดัชนี… (แชทจะรอสักครู่)" : s === "stale" ? "มีการเปลี่ยนแปลง · แชทยังใช้ข้อมูลเดิมจนกว่าจะอัปเดตดัชนี"
-    : idx.indexed != null ? "ดัชนีล่าสุด · " + idx.indexed + " ไฟล์" + (idx.skipped.length ? " · ข้าม " + idx.skipped.length + " ไฟล์: " + idx.skipped.join(", ") : "") : "");
+  const text = note?.text || (s === "error" ? idx.error : s === "busy" ? "กำลังอัปเดตข้อมูลอ้างอิง… (AI จะรอสักครู่)" : s === "stale" ? "มีการเปลี่ยนแปลง · AI ยังใช้ข้อมูลเดิมจนกว่าจะอัปเดตข้อมูลอ้างอิง"
+    : idx.indexed != null ? "ข้อมูลอ้างอิงเป็นปัจจุบัน · " + idx.indexed + " ไฟล์" + (idx.skipped.length ? " · ข้าม " + idx.skipped.length + " ไฟล์: " + idx.skipped.join(", ") : "") : "");
   box.className = "index " + (s === "error" ? "stale" : s) + (note?.err || s === "error" || idx.skipped?.length ? " err" : "");
   if (text) pill.textContent = text;
-  else pill.append("ดัชนีล่าสุด", el("small", { textContent: "แชทใช้ข้อมูลล่าสุดแล้ว" }));
+  else pill.append("ข้อมูลอ้างอิงเป็นปัจจุบัน", el("small", { textContent: "AI พร้อมใช้งานเอกสารล่าสุด" }));
   box.replaceChildren(pill);
 }
 
@@ -304,7 +304,7 @@ $("repl").onchange = (e) => {
   run(() => mutate("/api/admin/replace", { method: "POST", body: fd }));
 };
 $("newdir").onclick = async () => {
-  const name = prompt("ชื่อโฟลเดอร์ใหม่");
+  const name = prompt("ชื่อโฟลเดอร์");
   if (!name || !name.trim()) return;
   try { cwd = (await call("/api/admin/mkdir", json({ folder: name }))).folder; selected.clear(); await load(); } catch (e) { say(e.message, true); }
 };

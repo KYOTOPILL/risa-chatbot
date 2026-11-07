@@ -29,10 +29,10 @@ function formFill(sub, name, def, up, reload) {
       if (f.type === "file") { if (v) { fd.append("file_keys", f.key); fd.append("files", v); } } else answers[f.key] = v;
     });
     fd.append("doc_name", name); fd.append("answers", JSON.stringify(answers));
-    ev.target.disabled = true; ev.target.textContent = "AI กำลังตรวจ…";
+    ev.target.disabled = true; ev.target.textContent = "AI กำลังตรวจสอบ…";
     try { await api("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }); } finally { reload(); }
   });
-  return h("div", { class: "fillform" }, inputs, h("div", { class: "actions end" }, h("button", { class: "primary", type: "button", onclick: save }, up ? "บันทึกใหม่และให้ AI ตรวจ" : "บันทึกและให้ AI ตรวจ")));
+  return h("div", { class: "fillform" }, inputs, h("div", { class: "actions end" }, h("button", { class: "primary", type: "button", onclick: save }, up ? "บันทึกใหม่และให้ AI ตรวจสอบ" : "บันทึกและให้ AI ตรวจสอบ")));
 }
 
 // what was filled in: staff review and the researcher's own sent form
