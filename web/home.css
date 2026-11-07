@@ -137,3 +137,5 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 .login-card { display: flex; flex-direction: column; gap: 10px; }
 .login-card .primary { width: 100%; }
 @media (max-width: 700px) { .login-grid { grid-template-columns: 1fr; } }
+/* room under the last card for the floating chat button */
+.adm { padding-bottom: 88px; }

@@ -188,12 +188,6 @@ class Tracker:
         if not n:
             raise ValueError("upload cannot be sent")
 
-    def set_upload_status(self, upload_id: int, status: str) -> None:
-        if status not in UPLOAD_STATUSES:
-            raise ValueError("bad upload status")
-        with self._db() as db:
-            db.execute("UPDATE uploads SET status = ? WHERE id = ?", (status, upload_id))
-
     def latest_uploads(self, sid: int, step_index: int) -> dict[str, dict]:
         """Newest upload per document name for one step; older ones stay as history."""
         with self._db() as db:

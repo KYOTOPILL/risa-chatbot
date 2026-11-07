@@ -9,7 +9,7 @@ Local Thai chatbot (FastAPI backend + plain HTML/CSS/JS page in `web/`) over off
    ollama pull bge-m3
    ```
    Chat uses the OpenAI API (`gpt-5.4-nano`): put `OPENAI_API_KEY=sk-...` in a gitignored `.env` file. To try a local model instead, `ollama pull qwen3:8b` and start with `RISA_CHAT_BASE_URL=http://localhost:11434/v1 RISA_CHAT_MODEL=qwen3:8b` (any OpenAI-compatible server works); compare with `python -m evals.run_eval`.
-2. `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
+2. `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` (add `-r requirements-dev.txt` instead to run the tests)
 
 ## Content folder
 Put **only documents every staff member may see** in `content/` (path set by `CONTENT_DIR` in `config.py`). Never put salary, management, or other restricted files there: the bot trusts this folder completely.

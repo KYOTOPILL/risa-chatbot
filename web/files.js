@@ -1,4 +1,4 @@
-// File manager for the staff workspace. mountFiles() runs once, after files.html is in the page, and returns {open, close}.
+// File manager for the staff workspace. mountFiles() runs once, on the markup inside #files-root in home.html, and returns {open, close}.
 // Wrapped in a function so its names cannot clash with home.js.
 function mountFiles() {
 const $ = (id) => document.getElementById(id);

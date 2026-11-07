@@ -15,6 +15,66 @@
   </header>
   <main id="app"></main>
 </div>
+<!-- 📁 tab markup: files.js mounts on it the first time a staff member opens the tab; it lives outside #app so tab changes keep it -->
+<div id="files-root" hidden>
+<section class="card drive" id="list">
+    <div class="between">
+      <nav id="crumbs" class="crumbs" aria-label="โฟลเดอร์"></nav>
+      <div class="tools">
+        <button class="ghost" id="newdir" type="button">โฟลเดอร์ใหม่</button>
+        <button class="primary" id="pick" type="button">อัปโหลดไฟล์</button>
+        <input id="files" type="file" multiple hidden accept=".pdf,.docx,.xlsx,.pptx,.txt,.md">
+        <input id="repl" type="file" hidden accept=".pdf,.docx,.xlsx,.pptx,.txt,.md">
+      </div>
+    </div>
+
+    <div id="index" class="index" role="status"></div>
+
+    <div id="sel" class="bulk" inert>
+      <div class="bulkin">
+        <span id="selcount" class="count"></span>
+        <button class="ghost" id="shareon" type="button">เปิดให้ดาวน์โหลด</button>
+        <button class="ghost" id="shareoff" type="button">ปิดการดาวน์โหลด</button>
+        <button class="ghost" id="mvsel" type="button">ย้ายไป…</button>
+        <button class="ghost danger" id="delsel" type="button">ลบ</button>
+        <button class="ghost" id="clear" type="button">ยกเลิกการเลือก</button>
+      </div>
+    </div>
+
+    <div class="flist" role="table">
+      <div class="frow head" role="row">
+        <div><input id="all" type="checkbox" aria-label="เลือกทั้งหมด"></div>
+        <div>ชื่อ</div><div class="sw">ดาวน์โหลดในแชท</div><div class="sz">ขนาด</div><div class="dt">แก้ไขล่าสุด</div><div></div>
+      </div>
+      <div id="rows"><div class="frow sk"><div></div><div class="who"><span></span></div><div class="sw"></div><div class="sz"><span></span></div><div class="dt"><span></span></div><div></div></div><div class="frow sk"><div></div><div class="who"><span></span></div><div class="sw"></div><div class="sz"><span></span></div><div class="dt"><span></span></div><div></div></div><div class="frow sk"><div></div><div class="who"><span></span></div><div class="sw"></div><div class="sz"><span></span></div><div class="dt"><span></span></div><div></div></div></div>
+    </div>
+    <p id="empty" class="empty hidden">ยังไม่มีเอกสาร ลากไฟล์มาวางที่นี่เพื่ออัปโหลด</p>
+  </section>
+
+<div id="toast" class="toast hidden" role="status"><span id="tmsg"></span><button id="undo" class="link" type="button">เลิกทำ</button></div>
+
+<dialog id="up">
+  <form method="dialog">
+    <p id="upmsg"></p>
+    <label class="check"><input id="upshare" type="checkbox" checked> ให้ดาวน์โหลดผ่านแชทได้</label>
+    <p class="muted">ปิดไว้ถ้าเป็นเอกสารภายในที่ใช้ตอบคำถามเท่านั้น เปลี่ยนทีหลังได้ในรายการไฟล์</p>
+    <menu>
+      <button class="ghost" value="cancel">ยกเลิก</button>
+      <button class="primary" value="ok">อัปโหลด</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="mv">
+  <form method="dialog">
+    <label>ย้ายไปที่ <select id="dest"></select></label>
+    <menu>
+      <button class="ghost" value="cancel">ยกเลิก</button>
+      <button class="primary" value="ok">ย้าย</button>
+    </menu>
+  </form>
+</dialog>
+</div>
 <script src="/static/icons.js"></script>
 <script src="/static/files.js"></script>
 <script src="/static/todo.js"></script>

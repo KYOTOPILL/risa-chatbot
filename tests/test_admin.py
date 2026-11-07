@@ -179,10 +179,9 @@ def test_file_that_was_never_downloadable_still_gets_a_description(env):
     assert c.get("/api/admin/files").json()[0]["summary"] == "นโยบายภายใน"
 
 
-def test_files_fragment_served_for_the_workspace(env):
+def test_file_manager_markup_is_in_the_home_page(env):
     _, _, c = env
-    r = c.get("/static/files.html")
-    assert r.status_code == 200 and 'id="rows"' in r.text
+    assert 'id="rows"' in c.get("/").text  # the 📁 tab mounts files.js on markup that ships with the page
 
 
 def test_mkdir_and_folders_listing(env):

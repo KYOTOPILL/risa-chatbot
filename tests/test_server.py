@@ -184,7 +184,7 @@ def test_failed_answer_is_not_cached(client):
     assert state.cache == {}
 
 
-@pytest.mark.parametrize("js, html", [("app.js", "index.html"), ("files.js", "files.html")])
+@pytest.mark.parametrize("js, html", [("app.js", "index.html"), ("files.js", "home.html")])
 def test_every_element_id_a_script_looks_up_exists_in_its_page(js, html):
     import re
     from pathlib import Path

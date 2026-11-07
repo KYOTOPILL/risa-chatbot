@@ -103,7 +103,7 @@ async function researcherHome() {
 let tab = "queue";
 let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
 async function staffHome() {
-  if (filesRoot) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
+  if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const queue = await api("/review-queue").catch((e) => { fail(e); return []; });
   const items = [["queue", "📥 รอตรวจ (" + queue.length + ")"], ["subs", "📋 ทุกงาน"], ["types", "🧩 ประเภททุน"], ["files", "📁 ไฟล์ความรู้"]];
   const body = h("div", { class: "ws-main" });
@@ -113,12 +113,8 @@ async function staffHome() {
 }
 
 async function staffFiles(body) {
-  if (!filesRoot) {
-    filesRoot = h("div", { id: "files-root" });
-    filesRoot.innerHTML = await (await fetch("/static/files.html")).text();  // our own static markup, never API data
-    document.body.append(filesRoot);  // in the page before mounting: files.js looks its elements up by id
-    filesTab = mountFiles();
-  }
+  filesRoot ||= document.getElementById("files-root");
+  filesTab ||= mountFiles();
   filesRoot.hidden = false;
   body.append(filesRoot);
   filesTab.open();
@@ -230,7 +226,12 @@ async function draftEditor(vid) {
 
 // ---------- chat drawer (researchers) ----------
 // The old chat page, embedded: no chat code is copied and its history keeps working.
+const removeChat = () => document.querySelectorAll("#chat-drawer, #chat-fab").forEach((e) => e.remove());
+// one Escape listener for the page, not one per login
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") document.querySelector("#chat-drawer:not([hidden]) .chat-head button")?.click(); });
+
 function chatDrawer() {
+  removeChat();  // two overlapping logins must not leave two drawers
   const frame = h("iframe", { class: "chat-frame", title: "แชทผู้ช่วย RiSA" });
   const panel = h("aside", { class: "chat-drawer", id: "chat-drawer", hidden: true },
     h("div", { class: "chat-head" }, h("b", {}, "ถาม AI"), h("button", { class: "ghost", type: "button", "aria-label": "ปิดแชท", onclick: () => toggle(false) }, "✕")), frame);
@@ -240,20 +241,19 @@ function chatDrawer() {
     fab.hidden = open;
     if (open && !frame.getAttribute("src")) frame.src = "/chat";  // loaded on first open, not at page load
   }
-  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && panel.isConnected && !panel.hidden) toggle(false); });
   document.body.append(fab, panel);
 }
 
 // ---------- start ----------
 async function boot() {
-  document.querySelectorAll("#chat-drawer, #chat-fab").forEach((e) => e.remove());
+  removeChat();
   try { me = await api("/me"); } catch { me = null; }
   const logout = document.getElementById("logout");
   document.getElementById("who").textContent = me ? me.name + " · " + ROLE[me.role] : "";
   logout.hidden = !me;
   document.getElementById("chatlink").hidden = !me;
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
-  if (!me) return loginScreen().catch(fail);
+  if (!me) { tab = "queue"; return loginScreen().catch(fail); }  // the next staff member starts on the inbox
   users = await api("/mock-users");
   await (me.role === "staff" ? staffHome : researcherHome)();
   if (me.role === "researcher") chatDrawer();

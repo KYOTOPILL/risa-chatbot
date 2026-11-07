@@ -119,15 +119,14 @@ def test_list_drafts_returns_only_drafts(tk):
 def test_uploads_latest_wins_and_status_changes(sub):
     tk, sid, _ = sub
     u1 = tk.add_upload(sid, 0, "Form A", "a.pdf", "/p/a.pdf", [{"kind": "missing", "text": "x"}], "screened")
-    u2 = tk.add_upload(sid, 0, "Form A", "a2.pdf", "/p/a2.pdf", [], "screened")
+    u2 = tk.add_upload(sid, 0, "Form A", "a2.pdf", "/p/a2.pdf", [], "sent")
     assert tk.latest_uploads(sid, 0)["Form A"]["id"] == u2
-    tk.set_upload_status(u2, "sent")
     got = tk.get_upload(u2)
     assert got["status"] == "sent" and got["submission_id"] == sid and got["findings"] == []
     assert tk.get_upload(u1)["findings"][0]["kind"] == "missing"
     assert tk.get_upload(999) is None
     with pytest.raises(ValueError):
-        tk.set_upload_status(u2, "bogus")
+        tk.add_upload(sid, 0, "Form A", "a3.pdf", "/p/a3.pdf", [], "bogus")
 
 
 # ---- Task 6: staff review ----
@@ -142,9 +141,7 @@ def docs(tk):
     sid = tk.create_submission("S", v, ["r1"], "s1")
 
     def sent(doc, step=0):
-        u = tk.add_upload(sid, step, doc, f"{doc}.pdf", f"/p/{doc}.pdf", [{"kind": "missing", "text": "x"}], "screened")
-        tk.set_upload_status(u, "sent")
-        return u
+        return tk.add_upload(sid, step, doc, f"{doc}.pdf", f"/p/{doc}.pdf", [{"kind": "missing", "text": "x"}], "sent")
     return tk, sid, sent
 
 
@@ -230,9 +227,9 @@ def test_send_upload_only_from_screened_or_cannot_check(sub):
     tk.send_upload(u)
     assert tk.get_upload(u)["status"] == "sent"
     for status in ("sent", "approved", "returned"):
-        tk.set_upload_status(u, status)
+        decided = tk.add_upload(sid, 0, "Form A", "b.pdf", "/p", [], status)
         with pytest.raises(ValueError):
-            tk.send_upload(u)  # never overwrites a staff decision
+            tk.send_upload(decided)  # never overwrites a staff decision
 
 
 def test_stale_approval_does_not_log_a_second_advance(docs):
