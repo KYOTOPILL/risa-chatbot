@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS uploads (
     doc_name TEXT NOT NULL, filename TEXT NOT NULL, path TEXT NOT NULL, findings TEXT NOT NULL, status TEXT NOT NULL,
     dismissed TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', reviewed_by TEXT, answers TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, position INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, submission_id INTEGER NOT NULL, text TEXT NOT NULL,
     seen INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -79,7 +80,7 @@ class Tracker:
         with self._db() as db:
             db.executescript(SCHEMA)
             have = {r["name"] for r in db.execute("PRAGMA table_info(types)")}
-            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
+            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''"), ("category_id", "INTEGER")):  # databases made before posts existed
                 if col not in have:
                     db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
             if "answers" not in {r["name"] for r in db.execute("PRAGMA table_info(uploads)")}:
@@ -152,7 +153,7 @@ class Tracker:
             db.execute("DELETE FROM types WHERE id = ?", (type_id,))
         return [r["source_file"] for r in rows]
 
-    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id FROM versions v JOIN types t ON t.id = v.type_id"
+    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id, t.category_id AS category_id FROM versions v JOIN types t ON t.id = v.type_id"
 
     @staticmethod
     def _version(row) -> dict:
@@ -199,6 +200,52 @@ class Tracker:
     def approve_form(self, type_id: int, doc_name: str) -> bool:
         with self._db() as db:
             return db.execute("UPDATE forms SET status = 'approved' WHERE type_id = ? AND doc_name = ?", (type_id, doc_name)).rowcount > 0
+
+    # ---- categories: groups of types in the researcher's list; staff manage the list, a type has at most one ----
+    def add_category(self, name: str) -> int:
+        name = name.strip()
+        if not name:
+            raise ValueError("category needs a name")
+        with self._db() as db:
+            try:
+                return db.execute("INSERT INTO categories (name, position) VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM categories))", (name,)).lastrowid
+            except sqlite3.IntegrityError:
+                raise ValueError("a category with this name exists") from None
+
+    def list_categories(self) -> list[dict]:
+        with self._db() as db:
+            return [dict(r) for r in db.execute("SELECT c.id, c.name, c.position, (SELECT COUNT(*) FROM types t WHERE t.category_id = c.id) AS types FROM categories c ORDER BY c.position, c.id")]
+
+    def rename_category(self, category_id: int, name: str) -> None:
+        name = name.strip()
+        if not name:
+            raise ValueError("category needs a name")
+        with self._db() as db:
+            try:
+                n = db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id)).rowcount
+            except sqlite3.IntegrityError:
+                raise ValueError("a category with this name exists") from None
+        if not n:
+            raise KeyError(category_id)
+
+    def reorder_categories(self, ids: list[int]) -> None:
+        with self._db() as db:
+            db.executemany("UPDATE categories SET position = ? WHERE id = ?", [(i + 1, cid) for i, cid in enumerate(ids)])
+
+    def delete_category(self, category_id: int) -> None:
+        with self._db() as db:
+            if not db.execute("SELECT 1 FROM categories WHERE id = ?", (category_id,)).fetchone():
+                raise KeyError(category_id)
+            if db.execute("SELECT 1 FROM types WHERE category_id = ?", (category_id,)).fetchone():
+                raise ValueError("category is not empty")
+            db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+
+    def set_type_category(self, type_id: int, category_id: int | None) -> None:
+        with self._db() as db:
+            if category_id is not None and not db.execute("SELECT 1 FROM categories WHERE id = ?", (category_id,)).fetchone():
+                raise KeyError(category_id)
+            if not db.execute("UPDATE types SET category_id = ? WHERE id = ?", (category_id, type_id)).rowcount:
+                raise KeyError(type_id)
 
     # ---- posts: an open type is listed for researchers, who start their own request; the owner is staff in charge of those ----
     def set_type_open(self, type_id: int, is_open: bool, owner_id: str | None = None) -> None:

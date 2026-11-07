@@ -140,3 +140,26 @@ def test_delete_refused_when_requests_use_it_or_not_staff(env):
     assert s1.delete(f"/api/track/versions/{vid}").status_code == 409
     assert client("r1").delete(f"/api/track/types/{tid}").status_code == 403
     assert client("r1").get(f"/api/track/submissions/{sid}").status_code == 200  # request untouched
+
+
+def test_categories_staff_manage_everyone_reads_types_carry_one(env):
+    tk, tid = env
+    s1, r1 = client("s1"), client("r1")
+    a = s1.post("/api/track/categories", json={"name": " ทุนวิจัย "}).json()["id"]
+    b = s1.post("/api/track/categories", json={"name": "เบิกจ่าย"}).json()["id"]
+    assert s1.post("/api/track/categories", json={"name": "ทุนวิจัย"}).status_code == 409  # same name twice
+    assert s1.post("/api/track/categories", json={"name": "  "}).status_code == 400
+    assert r1.post("/api/track/categories", json={"name": "x"}).status_code == 403
+    assert [c["name"] for c in r1.get("/api/track/categories").json()] == ["ทุนวิจัย", "เบิกจ่าย"]  # a researcher may read
+    s1.put("/api/track/categories/order", json={"ids": [b, a]})
+    assert [c["name"] for c in r1.get("/api/track/categories").json()] == ["เบิกจ่าย", "ทุนวิจัย"]
+    assert s1.put(f"/api/track/categories/{a}", json={"name": "ทุน"}).status_code == 200
+    assert s1.put(f"/api/track/types/{tid}/category", json={"category_id": a}).status_code == 200
+    publish(s1, tid)
+    assert r1.get("/api/track/open-types").json()[0]["category_id"] == a
+    assert next(c for c in s1.get("/api/track/categories").json() if c["id"] == a)["types"] == 1
+    assert s1.delete(f"/api/track/categories/{a}").status_code == 409  # not empty
+    assert s1.put(f"/api/track/types/{tid}/category", json={"category_id": 999}).status_code == 404
+    assert s1.put(f"/api/track/types/{tid}/category", json={"category_id": None}).status_code == 200
+    assert s1.delete(f"/api/track/categories/{a}").status_code == 200
+    assert s1.delete(f"/api/track/categories/{a}").status_code == 404

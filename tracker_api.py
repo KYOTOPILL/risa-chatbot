@@ -288,9 +288,62 @@ def delete_version(vid: int, _: User = Depends(require_staff)):
     return _delete(state.get_tracker().delete_version, vid)
 
 
+# ---- categories: any logged-in user may read the list (researchers group types by it); staff change it ----
+class CategoryIn(BaseModel):
+    name: str
+
+
+class OrderIn(BaseModel):
+    ids: list[int]
+
+
+class TypeCategoryIn(BaseModel):
+    category_id: int | None = None
+
+
+def _category(call, *args) -> dict:
+    try:
+        out = call(*args)
+    except KeyError:
+        raise HTTPException(404, "not found")
+    except ValueError as e:
+        raise HTTPException(409 if "not empty" in str(e) or "exists" in str(e) else 400, str(e))
+    return {"ok": True, **({"id": out} if isinstance(out, int) else {})}
+
+
+@router.get("/categories")
+def categories(_: User = Depends(current_user)):
+    return state.get_tracker().list_categories()
+
+
+@router.post("/categories")
+def add_category(body: CategoryIn, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().add_category, body.name)
+
+
+@router.put("/categories/order")
+def order_categories(body: OrderIn, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().reorder_categories, body.ids)
+
+
+@router.put("/categories/{cid}")
+def rename_category(cid: int, body: CategoryIn, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().rename_category, cid, body.name)
+
+
+@router.delete("/categories/{cid}")
+def delete_category(cid: int, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().delete_category, cid)
+
+
+@router.put("/types/{type_id}/category")
+def set_type_category(type_id: int, body: TypeCategoryIn, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().set_type_category, type_id, body.category_id)
+
+
 @router.get("/open-types")
 def open_types(_: User = Depends(current_user)):
-    return [{"type_id": v["type_id"], "type_name": v["type_name"], "owner_id": v["owner_id"], "owner_name": MOCK_USERS.get(v["owner_id"], {}).get("name", ""),
+    return [{"type_id": v["type_id"], "type_name": v["type_name"], "category_id": v["category_id"], "owner_id": v["owner_id"], "owner_name": MOCK_USERS.get(v["owner_id"], {}).get("name", ""),
              "steps": [{"title": st["title"], "documents": st["documents"]} for st in v["steps"]]} for v in state.get_tracker().list_open_types()]
 
 
