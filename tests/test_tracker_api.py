@@ -266,9 +266,10 @@ def test_foreign_researcher_cannot_send_someone_elses_upload(up):
     assert login("r2").post(f"/api/track/uploads/{uid}/send").status_code == 404
 
 
-def test_staff_cannot_upload_and_unknown_doc_name_400(up):
+def test_only_staff_in_charge_may_upload_for_researcher_and_unknown_doc_name_400(up):
     _, sid, _ = up
-    assert put(login("s1"), sid).status_code == 403
+    assert put(login("s2"), sid).status_code == 404
+    assert put(login("s1"), sid).status_code == 200
     assert put(login("r1"), sid, doc="Nope").status_code == 400
 
 

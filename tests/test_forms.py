@@ -224,8 +224,20 @@ def test_sent_form_cannot_be_refilled_and_plain_upload_is_refused(env):
 def test_other_researcher_and_anonymous_cannot_fill(env):
     _, sid, tid, _ = env
     publish_form(tid)
-    assert fill(client("r2"), sid).status_code == 404 and fill(client("s1"), sid).status_code == 403
+    assert fill(client("r2"), sid).status_code == 404 and fill(client("s2"), sid).status_code == 404  # staff not in charge
     assert fill(TestClient(server.app), sid).status_code == 401
+
+
+def test_staff_in_charge_fills_sends_and_reviews_for_the_researcher(env):
+    _, sid, tid, _ = env
+    publish_form(tid)
+    s1 = client("s1")
+    r = fill(s1, sid)
+    assert r.status_code == 200
+    uid = r.json()["upload_id"]
+    assert s1.post(f"/api/track/uploads/{uid}/send").json()["status"] == "sent"
+    assert s1.post(f"/api/track/uploads/{uid}/review", json={"decision": "approve", "dismissed": [], "note": ""}).status_code == 200
+    assert client("r1").get(f"/api/track/submissions/{sid}").json()["current_step"] == 1
 
 
 def test_model_failure_while_screening_still_saves_the_form(env, monkeypatch):

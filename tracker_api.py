@@ -312,11 +312,9 @@ def approve(vid: int, _: User = Depends(require_staff)):
 
 
 def _own_submission(sid: int, user: User) -> dict:
-    """Researcher's own submission; anything else is a 404."""
-    if user.role != "researcher":
-        raise HTTPException(403, "researchers only")
-    sub = state.get_tracker().get_submission(sid, user.id, "researcher")
-    if sub is None:
+    """The researcher's own submission, or one staff in charge may fill in on the researcher's behalf; anything else is a 404."""
+    sub = state.get_tracker().get_submission(sid, user.id, user.role)
+    if sub is None or (user.role == "staff" and sub["staff_id"] != user.id):
         raise HTTPException(404, "not found")
     return sub
 

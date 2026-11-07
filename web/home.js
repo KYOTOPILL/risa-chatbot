@@ -221,6 +221,15 @@ async function staffSubs(body) {
         }) }, "สร้างงาน"))) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภทงาน)")));
 }
 
+// one document of a request, as staff see it: the researcher's view for the in-charge staff (who may fill it in), plus review once sent
+function staffDoc(sub, name, mine) {
+  const up = sub.uploads.find((u) => u.doc_name === name), again = () => staffDetail(sub.id).catch(fail);
+  if (!mine) return h("div", { class: "doc" }, h("b", {}, name), " ", h("span", { class: "muted" }, up ? STATUS[up.status] : "ยังไม่ได้ส่ง"), up ? (up.answers.length ? answersView(up) : h("a", { href: "/api/track/uploads/" + up.id + "/file", target: "_blank" }, "เปิดไฟล์ " + up.filename)) : null);
+  if (up && up.status === "sent") return h("div", { class: "doc" }, h("b", {}, name), " ", h("span", { class: "muted" }, STATUS.sent),
+    up.answers.length ? answersView(up) : h("a", { href: "/api/track/uploads/" + up.id + "/file", target: "_blank" }, "เปิดไฟล์ " + up.filename), ...reviewBlock(up, true, again));
+  return docRow(sub, name, again);
+}
+
 async function staffDetail(sid) {
   const sub = await api("/submissions/" + sid);
   const mine = sub.staff_id === me.id;
@@ -231,7 +240,27 @@ async function staffDetail(sid) {
         h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
         h("button", { class: "primary", type: "button", disabled: !mine || sub.current_step >= sub.step_count, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
         mine ? null : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้รับผิดชอบเท่านั้นที่แก้ไขได้"))),
+    h("section", { class: "card" }, h("h2", {}, "เอกสารของขั้นตอนนี้"),
+      mine ? h("p", { class: "muted sub" }, "กรอกหรืออัปโหลดแทนนักวิจัยได้จนกว่าจะส่ง เมื่อส่งแล้วตรวจสอบและอนุมัติได้ที่นี่") : h("p", { class: "muted sub" }, "ดูได้อย่างเดียว"),
+      sub.current_step >= sub.step_count ? h("p", { class: "muted" }, "ดำเนินการเสร็จสิ้น")
+        : !sub.steps[sub.current_step].documents.length ? h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร")
+        : sub.steps[sub.current_step].documents.map((d) => staffDoc(sub, d, mine))),
     h("section", { class: "card" }, h("h2", {}, "ประวัติ"), sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + e.staff_id + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน")));
+}
+
+// findings to dismiss, a note, approve or return: shared by the review queue and a request's page
+function reviewBlock(u, mine, after) {
+  const dismissed = new Set();
+  const note = h("input", { type: "text", placeholder: "หมายเหตุถึงนักวิจัย (ไม่บังคับ)" });
+  const list = h("div");
+  const draw = () => list.replaceChildren(...u.findings.map((f, i) => h("label", { class: "finding " + f.kind + (dismissed.has(i) ? " dismissed" : ""), style: "display:block" },
+    h("input", { type: "checkbox", checked: dismissed.has(i), onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }), " ", h("b", {}, KIND[f.kind]), " · ", f.text, " ", h("span", { class: "muted" }, "(ติ๊ก = ปัดตก)"))));
+  draw();
+  const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); after(); });
+  return [list, note, h("div", { class: "actions" },
+    h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
+    h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
+    mine ? null : h("span", { class: "muted" }, "เฉพาะผู้รับผิดชอบเท่านั้น"))];
 }
 
 async function staffQueue(body, q, subs) {
@@ -240,23 +269,12 @@ async function staffQueue(body, q, subs) {
   body.append(...[h("h1", { class: "page-title" }, "เอกสารรอตรวจสอบ"), h("p", { class: "muted sub" }, "เรียงตามวันที่ส่ง (เก่าสุดก่อน)"),
     q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจสอบ"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจสอบเกิน 7 วัน")) : null,
     q.length ? h("div", {}, q.map((u) => {
-    const dismissed = new Set();
-    const note = h("input", { type: "text", placeholder: "หมายเหตุถึงนักวิจัย (ไม่บังคับ)" });
-    const mine = u.staff_id === me.id;
-    const list = h("div");
-    const draw = () => list.replaceChildren(...u.findings.map((f, i) => h("label", { class: "finding " + f.kind + (dismissed.has(i) ? " dismissed" : ""), style: "display:block" },
-      h("input", { type: "checkbox", checked: dismissed.has(i), onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }), " ", h("b", {}, KIND[f.kind]), " · ", f.text, " ", h("span", { class: "muted" }, "(ติ๊ก = ปัดตก)"))));
-    draw();
-    const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); staffHome(); });
+    const rv = reviewBlock(u, u.staff_id === me.id, staffHome);
     const ai = u.findings.length ? h("span", { class: "badge warn" }, "AI พบ " + u.findings.length + " ข้อ") : h("span", { class: "badge ok" }, "AI ไม่พบข้อสังเกต (หรือตรวจสอบไม่ได้)");
     return h("div", { class: "doc" }, h("div", { class: "between" }, h("span", {}, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, "· " + u.submission_title)), ai),
       h("p", { class: "muted sub" }, "ผู้รับผิดชอบ " + u.staff_id + " · ส่ง " + agoText(u.created, now)), " ",
       u.answers.length ? answersView(u) : h("a", { href: "/api/track/uploads/" + u.id + "/file", target: "_blank" }, "เปิดไฟล์ " + u.filename),
-      list, note,
-      h("div", { class: "actions" },
-        h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
-        h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
-        mine ? null : h("span", { class: "muted" }, "เฉพาะผู้รับผิดชอบเท่านั้น")));
+      ...rv);
   })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ยังไม่มีเอกสารรอตรวจสอบ"), h("p", { class: "muted" }, "เมื่อมีนักวิจัยส่งเอกสารเพื่อตรวจสอบ รายการจะแสดงที่นี่"))].filter(Boolean));
 }
 
