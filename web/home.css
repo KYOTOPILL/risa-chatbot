@@ -284,3 +284,4 @@ dialog { max-width: calc(100vw - 32px); }
 .done-sub > summary { cursor: pointer; font-weight: 600; }
 .done-sub[open] > summary { margin-bottom: 14px; }
 .doc > button.ghost { margin-left: 10px; }
+.grpbar { display: flex; align-items: center; gap: 14px; padding: 4px 0 12px; border-bottom: 1px solid var(--line); }

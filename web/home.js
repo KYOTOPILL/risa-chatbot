@@ -180,14 +180,14 @@ async function researcherHome() {
 }
 
 // ---------- staff ----------
-let tab = "queue", openType = null;  // openType: the type whose page is open in the ประเภทงาน tab
+let tab = "queue", openType = null, openGroup = null;  // openType: the type whose page is open in the ประเภทงาน tab
 let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
   const items = [["queue", "queue", "รอตรวจสอบ", queue.length], ["subs", "list", "งานทั้งหมด"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "คลังเอกสาร"]];
   const body = h("div", { class: "ws-main" });
-  const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; staffHome(); } },
+  const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; openGroup = null; staffHome(); } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
   show(h("div", { class: "ws" }, menu, body));
   ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
@@ -227,12 +227,25 @@ async function staffSubs(body, queue = []) {
       && (!who.value || s.staff_id === who.value)
       && (!status.value || (status.value === "review" ? waiting.has(s.id) : status.value === "done" ? s.current_step >= s.step_count : s.current_step < s.step_count)));
     count.textContent = shown.length === subs.length ? subs.length + " รายการ" : shown.length + " จาก " + subs.length + " รายการ";
-    list.replaceChildren(...(shown.length ? shown.map((s) => h("div", { class: "list-row" },
+    const row = (s) => h("div", { class: "list-row" },
       h("span", { class: "grow" }, h("b", {}, s.title), " ", waiting.has(s.id) ? h("span", { class: "badge warn" }, "รอตรวจสอบ") : null,
-        h("span", { class: "muted block" }, s.type_name + " · นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้รับผิดชอบ " + nm(s.staff_id))),
+        h("span", { class: "muted block" }, "นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้รับผิดชอบ " + nm(s.staff_id))),
       progress(s),
-      h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "ดูรายละเอียด")))
-      : [h("p", { class: "muted" }, subs.length ? "ไม่พบงานที่ตรงกับตัวกรอง" : "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากงานที่เปิดรับงาน หรือสร้างให้ด้านล่าง")]));
+      h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "ดูรายละเอียด"));
+    if (openGroup) {  // inside one type: every request of it
+      const inGroup = shown.filter((s) => s.type_id === openGroup);
+      list.replaceChildren(h("div", { class: "grpbar" }, h("button", { class: "ghost", type: "button", onclick: () => { openGroup = null; draw(); } }, "← ประเภทงานทั้งหมด"),
+        h("b", {}, subs.find((s) => s.type_id === openGroup)?.type_name || "")), ...(inGroup.length ? inGroup.map(row) : [h("p", { class: "muted" }, "ไม่พบงานที่ตรงกับตัวกรอง")]));
+      return;
+    }
+    const groups = [...new Set(shown.map((s) => s.type_id))].map((id) => {
+      const mine = shown.filter((s) => s.type_id === id);
+      return h("div", { class: "list-row" },
+        h("span", { class: "grow" }, h("b", {}, mine[0].type_name), " ", mine.some((s) => waiting.has(s.id)) ? h("span", { class: "badge warn" }, mine.filter((s) => waiting.has(s.id)).length + " รอตรวจสอบ") : null,
+          h("span", { class: "muted block" }, mine.length + " งาน · กำลังดำเนินการ " + mine.filter((s) => s.current_step < s.step_count).length + " · เสร็จสิ้น " + mine.filter((s) => s.current_step >= s.step_count).length)),
+        h("button", { class: "ghost", type: "button", onclick: () => { openGroup = id; draw(); } }, "เปิดดูงาน"));
+    });
+    list.replaceChildren(...(groups.length ? groups : [h("p", { class: "muted" }, subs.length ? "ไม่พบงานที่ตรงกับตัวกรอง" : "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากงานที่เปิดรับงาน หรือสร้างให้ด้านล่าง")]));
   };
   [find, status, who].forEach((el) => el.addEventListener(el === find ? "input" : "change", draw));
   draw();
