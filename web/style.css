@@ -106,7 +106,7 @@ button:active:not(:disabled), .chip:active { transform: scale(.97); }
 html { -webkit-text-size-adjust: 100%; }  /* iOS must not enlarge text after a rotate */
 .top { flex-wrap: wrap; gap: 8px 12px; }
 @media (pointer: coarse) {  /* fingers: 44px is the smallest comfortable tap target */
-  .ghost, .primary, .chip, #send { min-height: 44px; }
+  .ghost, .primary, .chip, #send, .navitem, .lnk { min-height: 44px; }
   .ghost, .primary { display: inline-flex; align-items: center; justify-content: center; }
   .menu button { min-height: 44px; }
   input[type=checkbox] { width: 22px; height: 22px; }

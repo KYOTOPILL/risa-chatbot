@@ -11,4 +11,26 @@ function todoItems(subs) {
   }
   return [...out.returned, ...out.waiting];
 }
-if (typeof module !== "undefined") module.exports = { todoItems };
+
+// SQLite stores UTC as "YYYY-MM-DD HH:MM:SS"
+const utc = (ts) => new Date(ts.replace(" ", "T") + "Z");
+const DAY = 86400000;
+
+// Staff numbers: documents waiting, submissions still open, documents that have waited over 7 days (from upload time).
+function staffStats(queue, subs, now) {
+  const t = new Date(now).getTime();
+  return {
+    waiting: queue.length,
+    active: subs.filter((s) => s.current_step < s.step_count).length,
+    old: queue.filter((u) => t - utc(u.created).getTime() > 7 * DAY).length,
+  };
+}
+
+function agoText(ts, now) {
+  const ms = new Date(now).getTime() - utc(ts).getTime();
+  if (ms < 3600000) return "เมื่อสักครู่";
+  if (ms < DAY) return Math.floor(ms / 3600000) + " ชั่วโมงก่อน";
+  const d = Math.floor(ms / DAY);
+  return d === 1 ? "เมื่อวาน" : d + " วันก่อน";
+}
+if (typeof module !== "undefined") module.exports = { todoItems, staffStats, agoText };

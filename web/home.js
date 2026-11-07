@@ -109,12 +109,13 @@ let tab = "queue";
 let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
-  const queue = await api("/review-queue").catch((e) => { fail(e); return []; });
-  const items = [["queue", "queue", "รอตรวจ (" + queue.length + ")"], ["subs", "list", "ทุกงาน"], ["types", "types", "ประเภททุน"], ["files", "folder", "ไฟล์ความรู้"]];
+  const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
+  const items = [["queue", "queue", "รอตรวจ", queue.length], ["subs", "list", "ทุกงาน"], null, ["types", "types", "ประเภททุน"], ["files", "folder", "ไฟล์ความรู้"]];
   const body = h("div", { class: "ws-main" });
-  const menu = h("nav", { class: "ws-menu" }, items.map(([id, ic, label]) => h("button", { class: "ghost", type: "button", "aria-current": String(id === tab), onclick: () => { tab = id; staffHome(); } }, icon(ic), label)));
+  const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; staffHome(); } },
+    icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
   show(h("div", { class: "ws" }, menu, body));
-  ({ subs: staffSubs, queue: (b) => staffQueue(b, queue), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
+  ({ subs: staffSubs, queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
 }
 
 async function staffFiles(body) {
@@ -159,8 +160,12 @@ async function staffDetail(sid) {
     h("section", { class: "card" }, h("h2", {}, "ประวัติ"), sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + e.staff_id + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน")));
 }
 
-async function staffQueue(body, q) {
-  body.append(h("section", { class: "card" }, h("h2", {}, "เอกสารรอตรวจ"), q.length ? q.map((u) => {
+async function staffQueue(body, q, subs) {
+  const now = new Date().toISOString(), st = staffStats(q, subs, now);
+  const stat = (n, label) => h("div", { class: "stat" }, h("b", {}, String(n)), h("span", {}, label));
+  body.append(h("h1", { class: "page-title" }, "เอกสารรอตรวจ"), h("p", { class: "muted sub" }, "เรียงจากส่งมาก่อน"),
+    q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจ"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจเกิน 7 วัน")) : null,
+    q.length ? h("div", {}, q.map((u) => {
     const dismissed = new Set();
     const note = h("input", { type: "text", placeholder: "หมายเหตุถึงนักวิจัย (ไม่บังคับ)" });
     const mine = u.staff_id === me.id;
@@ -169,14 +174,16 @@ async function staffQueue(body, q) {
       h("input", { type: "checkbox", checked: dismissed.has(i), onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }), " ", h("b", {}, KIND[f.kind]), " · ", f.text, " ", h("span", { class: "muted" }, "(ติ๊ก = ปัดตก)"))));
     draw();
     const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); staffHome(); });
-    return h("div", { class: "doc" }, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, u.submission_title + " · ผู้ดูแล " + u.staff_id + " · " + (u.findings.length ? "AI พบ " + u.findings.length + " ข้อ" : "AI ไม่พบข้อสังเกต (หรือตรวจไม่ได้)")), " ",
+    const ai = u.findings.length ? h("span", { class: "badge warn" }, "AI พบ " + u.findings.length + " ข้อ") : h("span", { class: "badge ok" }, "AI ไม่พบข้อสังเกต (หรือตรวจไม่ได้)");
+    return h("div", { class: "doc" }, h("div", { class: "between" }, h("span", {}, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, "· " + u.submission_title)), ai),
+      h("p", { class: "muted sub" }, "ผู้ดูแล " + u.staff_id + " · ส่ง " + agoText(u.created, now)), " ",
       h("a", { href: "/api/track/uploads/" + u.id + "/file", target: "_blank" }, "เปิดไฟล์ " + u.filename),
       list, note,
       h("div", { class: "actions" },
         h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
         h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
         mine ? null : h("span", { class: "muted" }, "เฉพาะผู้ดูแลเท่านั้น")));
-  }) : h("p", { class: "muted" }, "ไม่มีเอกสารรอตรวจ")));
+  })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ไม่มีเอกสารรอตรวจ"), h("p", { class: "muted" }, "เมื่อนักวิจัยกดส่งเอกสาร จะแสดงที่นี่")));
 }
 
 async function staffTypes(body) {
@@ -254,7 +261,7 @@ async function boot() {
   removeChat();
   try { me = await api("/me"); } catch { me = null; }
   const logout = document.getElementById("logout");
-  document.getElementById("who").textContent = me ? me.name + " · " + ROLE[me.role] : "";
+  document.getElementById("who").replaceChildren(...(me ? [h("span", { class: "av" }, me.name[0].toUpperCase()), h("span", {}, me.name, h("small", {}, ROLE[me.role]))] : []));
   logout.hidden = !me;
   document.getElementById("chatlink").hidden = !me;
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
