@@ -87,8 +87,8 @@ def test_researcher_starts_their_own_request_owned_by_the_post_owner(env):
     got = r1.get(f"/api/track/submissions/{a}").json()
     assert got["researcher_ids"] == ["r1"] and got["staff_id"] == "s2" and got["title"] == "Travel claim - Somchai" and got["current_step"] == 0
     assert r2.get(f"/api/track/submissions/{a}").status_code == 404  # Nida cannot see Somchai's request
-    b = r1.post(f"/api/track/open-types/{tid}/start").json()["id"]  # the same post again is allowed, with its own title
-    assert b != a and r1.get(f"/api/track/submissions/{b}").json()["title"] == "Travel claim - Somchai #2"
+    again = r1.post(f"/api/track/open-types/{tid}/start").json()  # the same post twice gives the same request, no copy
+    assert again["id"] == a and [s["id"] for s in r1.get("/api/track/submissions").json()] == [a]
     assert [s["id"] for s in r2.get("/api/track/submissions").json()] == []
 
 

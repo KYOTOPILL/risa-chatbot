@@ -91,16 +91,16 @@ function subCard(sub) {
       : h("p", {}, "งานนี้เสร็จสิ้นแล้ว"));
 }
 
-function openPosts(posts) {
+function openPosts(posts, subs) {
   if (!posts.length) return null;
   return h("section", { class: "card" }, h("h2", {}, "งานที่เปิดรับ"), h("p", { class: "muted" }, "เลือกงานที่ต้องการส่ง ระบบจะสร้างงานของคุณเอง"),
     posts.map((p) => h("div", { class: "list-row" },
       h("span", {}, h("b", {}, p.type_name), " ", h("span", { class: "muted" }, p.steps.length + " ขั้นตอน · เอกสาร: " + ([...new Set(p.steps.flatMap((s) => s.documents))].join(", ") || "ไม่มี") + " · ผู้ดูแล " + p.owner_name)),
-      h("button", { class: "primary", type: "button", onclick: act(async () => {
-        const out = await api("/open-types/" + p.type_id + "/start", { method: "POST" });
-        await researcherHome();
-        document.getElementById("sub-" + out.id)?.scrollIntoView({ behavior: "smooth" });
-      }) }, "เริ่มส่ง"))));
+      (() => {
+        const mine = subs.find((s) => s.type_id === p.type_id), go = (id) => document.getElementById("sub-" + id)?.scrollIntoView({ behavior: "smooth" });
+        return mine ? h("button", { class: "ghost", type: "button", onclick: () => go(mine.id) }, "ไปที่งานของฉัน")
+          : h("button", { class: "primary", type: "button", onclick: act(async () => { const out = await api("/open-types/" + p.type_id + "/start", { method: "POST" }); await researcherHome(); go(out.id); }) }, "เริ่มส่ง");
+      })())));
 }
 
 async function researcherHome() {
@@ -114,7 +114,7 @@ async function researcherHome() {
           t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)")) : h("span", { class: "muted" }, "รอเจ้าหน้าที่ตรวจ")),
         h("button", { class: "ghost", type: "button", onclick: () => document.getElementById("sub-" + t.sub.id).scrollIntoView({ behavior: "smooth" }) }, "ไปที่งานนี้")))
         : h("p", { class: "muted" }, "ไม่มีงานค้าง")),
-    openPosts(posts),
+    openPosts(posts, subs),
     subs.length ? subs.map(subCard) : h("section", { class: "card" }, h("p", { class: "muted" }, posts.length ? "ยังไม่มีงานของคุณ เริ่มจาก “งานที่เปิดรับ” ด้านบน" : "ยังไม่มีงาน และยังไม่มีงานที่เปิดรับ")));
 }
 

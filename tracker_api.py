@@ -195,9 +195,10 @@ def start_request(type_id: int, user: User = Depends(current_user)):
     v = next((v for v in tk.list_open_types() if v["type_id"] == type_id), None)
     if v is None:
         raise HTTPException(404, "this post is not open")
-    n = sum(1 for s in tk.list_submissions(user.id, "researcher") if s["type_name"] == v["type_name"])
-    title = f"{v['type_name']} - {user.name}" + (f" #{n + 1}" if n else "")
-    return {"id": tk.create_submission(title, v["id"], [user.id], v["owner_id"])}
+    mine = next((s for s in tk.list_submissions(user.id, "researcher") if s["type_id"] == type_id), None)
+    if mine:  # one request per post: go back to it and edit instead of starting a copy
+        return {"id": mine["id"]}
+    return {"id": tk.create_submission(f"{v['type_name']} - {user.name}", v["id"], [user.id], v["owner_id"])}
 
 
 @router.post("/types/{type_id}/versions")
