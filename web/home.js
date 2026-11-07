@@ -28,7 +28,7 @@ const STATUS = { screened: "AI ตรวจแล้ว", cannot_check: "AI ต�
 const KIND = { missing: "ขาดหายไป", incorrect: "อาจไม่ถูกต้อง", unclear: "ไม่ชัดเจน" };
 const ROLE = { researcher: "นักวิจัย", staff: "เจ้าหน้าที่" };
 
-function show(...nodes) { app.replaceChildren(...nodes); }
+function show(...nodes) { app.replaceChildren(...nodes.filter(Boolean)); }
 function fail(e) { alert(e.message); }
 const act = (fn) => async (ev) => { try { await fn(ev); } catch (e) { fail(e); } };
 
