@@ -115,6 +115,22 @@ def move(sid: int, body: MoveIn, user: User = Depends(require_staff)):
     return {"ok": True}
 
 
+class StaffIn(BaseModel):
+    staff_id: str
+
+
+@router.post("/submissions/{sid}/staff")
+def reassign(sid: int, body: StaffIn, _: User = Depends(require_staff)):
+    """Any staff member may hand a request over, so one person being away never strands it."""
+    if body.staff_id not in MOCK_USERS or MOCK_USERS[body.staff_id]["role"] != "staff":
+        raise HTTPException(400, "the person in charge must be a staff member")
+    try:
+        state.get_tracker().set_staff(sid, body.staff_id)
+    except ValueError:
+        raise HTTPException(404, "not found")
+    return {"ok": True}
+
+
 UPLOAD_EXTS = {".pdf", ".docx"}
 
 
@@ -370,7 +386,7 @@ ATTACH_EXTS = UPLOAD_EXTS | {".jpg", ".jpeg", ".png"}  # a scanned receipt or si
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def _answers(form: dict, raw: dict, files: dict, prev: list, sid: int) -> list:
+def _answers(form: dict, raw: dict, files: dict, prev: list, sid: int, draft: bool = False) -> list:
     """Checks the researcher's answers against the approved form. Returns a snapshot (label and type included) so later form edits never change what staff review."""
     old = {a["key"]: a["value"] for a in prev}
     out = []
@@ -393,7 +409,7 @@ def _answers(form: dict, raw: dict, files: dict, prev: list, sid: int) -> list:
                 raise HTTPException(400, f"{f['label']}: รูปแบบวันที่ไม่ถูกต้อง")
             if v and kind == "choice" and v not in f["options"]:
                 raise HTTPException(400, f"{f['label']}: เลือกได้เฉพาะตัวเลือกที่กำหนด")
-        if f["required"] and not v:
+        if f["required"] and not v and not draft:
             raise HTTPException(400, f"กรุณากรอก: {f['label']}")
         out.append({"key": k, "label": f["label"], "type": kind, "value": v})
     return out
@@ -414,7 +430,7 @@ def _answers_text(title: str, answers: list) -> str:
 
 
 @router.post("/submissions/{sid}/forms")
-def submit_form(request: Request, sid: int, doc_name: str = Form(...), answers: str = Form("{}"), file_keys: list[str] = Form([]), files: list[UploadFile] = File([]),
+def submit_form(request: Request, sid: int, doc_name: str = Form(...), answers: str = Form("{}"), draft: bool = Form(False), file_keys: list[str] = Form([]), files: list[UploadFile] = File([]),
                 user: User = Depends(current_user)):
     """Researcher fills the online form of a document. Saving again replaces the earlier answers until the document is sent."""
     sub = _own_submission(sid, user)
@@ -432,7 +448,11 @@ def submit_form(request: Request, sid: int, doc_name: str = Form(...), answers: 
     except Exception:
         raise HTTPException(400, "answers must be a JSON object")
     prev = next((u["answers"] for u in sorted(sub["uploads"], key=lambda u: -u["id"]) if u["doc_name"] == doc_name), [])
-    snap = _answers(form, raw, dict(zip(file_keys, files)), prev, sid)  # checked and files saved before streaming: the uploads are closed once this handler returns
+    snap = _answers(form, raw, dict(zip(file_keys, files)), prev, sid, draft)  # checked and files saved before streaming: the uploads are closed once this handler returns
+
+    if draft:  # a half-filled form is only kept: no AI check, and it cannot be sent until saved in full
+        uid = state.get_tracker().add_upload(sid, n, doc_name, form["title"], "", None, "draft", snap)
+        return {"upload_id": uid, "status": "draft", "findings": []}
 
     def work(say):
         findings, status = None, "cannot_check"

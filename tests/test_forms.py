@@ -284,3 +284,28 @@ def test_progress_error_comes_as_an_error_line_and_validation_stays_a_plain_400(
     lines = [json.loads(l) for l in r.text.splitlines()]
     assert lines[-1].keys() == {"error"} and "could not draft" in lines[-1]["error"]
     assert s1.get(f"/api/track/types/{tid}/forms").json() == []
+
+
+def test_draft_saves_half_filled_form_without_ai_and_cannot_be_sent(env):
+    _, sid, tid, llm = env
+    publish_form(tid)
+    calls = llm.calls if hasattr(llm, "calls") else None
+    r1 = client("r1")
+    assert fill(r1, sid, {"f1": "", "f2": ""}, files={}).status_code == 400  # a full save still needs required fields
+    d = r1.post(f"/api/track/submissions/{sid}/forms", data={"doc_name": "Travel claim", "answers": json.dumps({"f1": "Somchai"}), "draft": "true"})
+    assert d.status_code == 200 and d.json()["status"] == "draft"
+    sub = r1.get(f"/api/track/submissions/{sid}").json()
+    assert sub["uploads"][0]["status"] == "draft" and sub["uploads"][0]["answers"][0]["value"] == "Somchai"
+    assert r1.post(f"/api/track/uploads/{d.json()['upload_id']}/send").status_code == 400
+    assert client("s1").get("/api/track/review-queue").json() == []
+    full = fill(r1, sid)  # saving in full afterwards replaces the draft and can be sent
+    assert full.status_code == 200 and r1.post(f"/api/track/uploads/{full.json()['upload_id']}/send").status_code == 200
+
+
+def test_any_staff_may_reassign_a_request_researchers_may_not(env):
+    tk, sid, _, _ = env
+    assert client("s2").post(f"/api/track/submissions/{sid}/staff", json={"staff_id": "s2"}).status_code == 200
+    assert tk.get_submission(sid, "s2", "staff")["staff_id"] == "s2"
+    assert client("r1").post(f"/api/track/submissions/{sid}/staff", json={"staff_id": "s1"}).status_code == 403
+    assert client("s1").post(f"/api/track/submissions/{sid}/staff", json={"staff_id": "r1"}).status_code == 400
+    assert client("s1").post("/api/track/submissions/999/staff", json={"staff_id": "s1"}).status_code == 404

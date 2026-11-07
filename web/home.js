@@ -73,7 +73,7 @@ async function runProgress(from, title, start, onDone, retry) {
 const send = (method, body) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const form = (fields) => { const f = new FormData(); for (const [k, v] of Object.entries(fields)) f.append(k, v); return { method: "POST", body: f }; };
 
-const STATUS = { screened: "AI ตรวจสอบแล้ว", cannot_check: "AI ตรวจสอบไม่ได้ (ยังส่งได้)", sent: "รอเจ้าหน้าที่ตรวจสอบ", approved: "อนุมัติแล้ว", returned: "ส่งกลับให้แก้ไข" };
+const STATUS = { draft: "แบบร่าง (ยังไม่ได้ส่ง)", screened: "AI ตรวจสอบแล้ว", cannot_check: "AI ตรวจสอบไม่ได้ (ยังส่งได้)", sent: "รอเจ้าหน้าที่ตรวจสอบ", approved: "อนุมัติแล้ว", returned: "ส่งกลับให้แก้ไข" };
 const KIND = { missing: "ขาดหายไป", incorrect: "อาจไม่ถูกต้อง", unclear: "ไม่ชัดเจน" };
 const ROLE = { researcher: "นักวิจัย", staff: "เจ้าหน้าที่" };
 
@@ -233,9 +233,12 @@ function staffDoc(sub, name, mine) {
 async function staffDetail(sid) {
   const sub = await api("/submissions/" + sid);
   const mine = sub.staff_id === me.id;
+  const nm = (id) => users.find((u) => u.id === id)?.name || id;
   const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); staffDetail(sid); });
+  const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await api("/submissions/" + sid + "/staff", send("POST", { staff_id: ev.target.value })); staffDetail(sid); }) },
+    users.filter((u) => u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === sub.staff_id }, "ผู้รับผิดชอบ " + u.name)));
   show(h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"),
-    h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · ผู้รับผิดชอบ " + sub.staff_id + " · นักวิจัย " + sub.researcher_ids.join(", ")), stepper(sub),
+    h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · นักวิจัย " + sub.researcher_ids.map(nm).join(", ")), h("div", { class: "actions" }, owner, h("span", { class: "muted" }, "เปลี่ยนผู้รับผิดชอบได้ทุกคน เมื่อคนเดิมไม่อยู่")), stepper(sub),
       h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
         h("button", { class: "primary", type: "button", disabled: !mine || sub.current_step >= sub.step_count, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
@@ -245,7 +248,7 @@ async function staffDetail(sid) {
       sub.current_step >= sub.step_count ? h("p", { class: "muted" }, "ดำเนินการเสร็จสิ้น")
         : !sub.steps[sub.current_step].documents.length ? h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร")
         : sub.steps[sub.current_step].documents.map((d) => staffDoc(sub, d, mine))),
-    h("section", { class: "card" }, h("h2", {}, "ประวัติ"), sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + e.staff_id + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน")));
+    h("section", { class: "card" }, h("h2", {}, "ประวัติ"), sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + nm(e.staff_id) + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน")));
 }
 
 // findings to dismiss, a note, approve or return: shared by the review queue and a request's page

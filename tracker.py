@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS uploads (
     dismissed TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', reviewed_by TEXT, answers TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
-UPLOAD_STATUSES = {"screened", "cannot_check", "sent", "approved", "returned"}
+UPLOAD_STATUSES = {"draft", "screened", "cannot_check", "sent", "approved", "returned"}
 
 
 def validate_steps(steps) -> list:
@@ -255,6 +255,12 @@ class Tracker:
         sub["uploads"] = [{k: v for k, v in u.items() if k != "path"}
                           for u in (self.latest_uploads(sid, cur).values() if cur < sub["step_count"] else [])]
         return sub
+
+    def set_staff(self, sid: int, staff_id: str) -> None:
+        """Hand a request to another staff member. Who may do it is the caller's rule."""
+        with self._db() as db:
+            if not db.execute("UPDATE submissions SET staff_id = ? WHERE id = ?", (staff_id, sid)).rowcount:
+                raise ValueError("no such submission")
 
     def move_step(self, sid: int, staff_id: str, to_step: int, note: str = "") -> None:
         """Only the staff in charge may move; to_step == step_count means completed."""

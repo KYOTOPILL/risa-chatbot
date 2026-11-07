@@ -22,8 +22,8 @@ function fieldInput(f, value, readOnly = false) {
 function formFill(sub, name, def, up, reload) {
   const old = Object.fromEntries((up?.answers || []).map((a) => [a.key, a.value]));
   const inputs = def.fields.map((f) => fieldInput(f, old[f.key]));
-  const save = (ev) => {
-    const missing = def.fields.findIndex((f, i) => f.required && (f.type === "file" ? !inputs[i].get() && !old[f.key] : !String(inputs[i].get()).trim()));
+  const save = (ev, draft) => {
+    const missing = draft ? -1 : def.fields.findIndex((f, i) => f.required && (f.type === "file" ? !inputs[i].get() && !old[f.key] : !String(inputs[i].get()).trim()));
     if (missing >= 0) { alert("กรุณากรอก: " + def.fields[missing].label); return; }  // before the progress panel: it would replace the form and lose what was typed
     const fd = new FormData(), answers = {};
     def.fields.forEach((f, i) => {
@@ -31,9 +31,12 @@ function formFill(sub, name, def, up, reload) {
       if (f.type === "file") { if (v) { fd.append("file_keys", f.key); fd.append("files", v); } } else answers[f.key] = v;
     });
     fd.append("doc_name", name); fd.append("answers", JSON.stringify(answers));
+    if (draft) return act(async () => { fd.append("draft", "true"); await api("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }); reload(); })(ev);  // kept as is: no AI check, no required fields
     runProgress(ev.target, "กำลังบันทึกและตรวจสอบ “" + def.title + "”", (say) => apiStream("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }, say), reload, reload);
   };
-  return h("div", { class: "fillform" }, inputs, h("div", { class: "actions end" }, h("button", { class: "primary", type: "button", onclick: save }, up ? "บันทึกใหม่และให้ AI ตรวจสอบ" : "บันทึกและให้ AI ตรวจสอบ")));
+  return h("div", { class: "fillform" }, inputs, h("div", { class: "actions end" },
+    h("button", { class: "ghost", type: "button", onclick: (ev) => save(ev, true) }, "บันทึกแบบร่าง (ยังไม่ตรวจสอบ)"),
+    h("button", { class: "primary", type: "button", onclick: (ev) => save(ev, false) }, up && up.status !== "draft" ? "บันทึกใหม่และให้ AI ตรวจสอบ" : "บันทึกและให้ AI ตรวจสอบ")));
 }
 
 // what was filled in: staff review and the researcher's own sent form
