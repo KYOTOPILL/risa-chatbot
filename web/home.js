@@ -54,8 +54,7 @@ function stepper(sub) {
   const done = (i) => sub.events.filter((e) => e.to_step > i && e.from_step <= i).map((e) => e.at.slice(0, 10)).pop();
   return h("ol", { class: "steps" }, sub.steps.map((s, i) => {
     const cls = i < sub.current_step ? "done" : i === sub.current_step ? "now" : "next";
-    const mark = cls === "done" ? "✅" : cls === "now" ? "🔵" : "⚪";
-    return h("li", { class: cls }, mark, h("span", {}, (i + 1) + ". " + s.title), cls === "done" && done(i) ? h("span", { class: "muted" }, done(i)) : null);
+        return h("li", { class: cls }, h("span", {}, (i + 1) + ". " + s.title), cls === "done" && done(i) ? h("span", { class: "muted" }, done(i)) : null);
   }));
 }
 
@@ -111,9 +110,9 @@ let filesRoot = null, filesTab = null;  // the file manager: built once, kept in
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const queue = await api("/review-queue").catch((e) => { fail(e); return []; });
-  const items = [["queue", "📥 รอตรวจ (" + queue.length + ")"], ["subs", "📋 ทุกงาน"], ["types", "🧩 ประเภททุน"], ["files", "📁 ไฟล์ความรู้"]];
+  const items = [["queue", "queue", "รอตรวจ (" + queue.length + ")"], ["subs", "list", "ทุกงาน"], ["types", "types", "ประเภททุน"], ["files", "folder", "ไฟล์ความรู้"]];
   const body = h("div", { class: "ws-main" });
-  const menu = h("nav", { class: "ws-menu" }, items.map(([id, label]) => h("button", { class: "ghost", type: "button", "aria-current": String(id === tab), onclick: () => { tab = id; staffHome(); } }, label)));
+  const menu = h("nav", { class: "ws-menu" }, items.map(([id, ic, label]) => h("button", { class: "ghost", type: "button", "aria-current": String(id === tab), onclick: () => { tab = id; staffHome(); } }, icon(ic), label)));
   show(h("div", { class: "ws" }, menu, body));
   ({ subs: staffSubs, queue: (b) => staffQueue(b, queue), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
 }
@@ -215,7 +214,7 @@ async function draftEditor(vid) {
     const title = h("input", { type: "text", value: s.title, oninput: (e) => { s.title = e.target.value; } });
     const docs = h("textarea", { rows: 2, placeholder: "เอกสารที่ต้องเตรียม (บรรทัดละหนึ่งรายการ)", oninput: (e) => { s.documents = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); } }, s.documents.join("\n"));
     return h("div", { class: "stepedit" + (s.unsure ? " unsure" : "") },
-      h("b", {}, "ขั้นที่ " + (i + 1)), s.unsure ? h("span", { class: "muted" }, "⚠ AI ไม่แน่ใจ ตรวจสอบก่อนอนุมัติ") : null,
+      h("b", {}, "ขั้นที่ " + (i + 1)), s.unsure ? h("span", { class: "warn" }, "AI ไม่แน่ใจ ตรวจสอบก่อนอนุมัติ") : null,
       s.page ? h("span", { class: "muted" }, "มาจากหน้า " + s.page + " ของเอกสาร") : null, title, docs,
       h("button", { class: "ghost danger", type: "button", onclick: () => { steps.splice(i, 1); draw(); } }, "ลบขั้นตอนนี้"));
   }));
@@ -240,8 +239,8 @@ function chatDrawer() {
   removeChat();  // two overlapping logins must not leave two drawers
   const frame = h("iframe", { class: "chat-frame", title: "แชทผู้ช่วย RiSA" });
   const panel = h("aside", { class: "chat-drawer", id: "chat-drawer", hidden: true },
-    h("div", { class: "chat-head" }, h("b", {}, "ถาม AI"), h("button", { class: "ghost", type: "button", "aria-label": "ปิดแชท", onclick: () => toggle(false) }, "✕")), frame);
-  const fab = h("button", { class: "primary chat-fab", id: "chat-fab", type: "button", onclick: () => toggle(true) }, "💬 ถาม AI");
+    h("div", { class: "chat-head" }, h("b", {}, "ถาม AI"), h("button", { class: "ghost", type: "button", "aria-label": "ปิดแชท", onclick: () => toggle(false) }, "×")), frame);
+  const fab = h("button", { class: "primary chat-fab", id: "chat-fab", type: "button", onclick: () => toggle(true) }, icon("chat"), "ถาม AI");
   function toggle(open) {
     panel.hidden = !open;
     fab.hidden = open;
