@@ -66,51 +66,66 @@ async function staffForms(body) {
     }) : h("section", { class: "card empty" }, h("b", {}, "ยังไม่มีประเภทงานที่อนุมัติ"), h("p", { class: "muted" }, "สร้างและอนุมัติประเภทงานก่อน (เมนู ประเภทงาน)"))].flat());
 }
 
-// Google-Forms style: every question is a card showing what the researcher sees; click a card to edit it (one open at a time).
-function formEditor(t, f, previewing = false, active = 0) {
+// Editor: one line per question, settings of the selected line in a side panel; แก้ไข and ตัวอย่าง are two tabs.
+const CHIP = { text: "", longtext: "", number: "num", date: "date", choice: "ch", file: "file" };
+function formEditor(t, f, preview = false, sel = 0) {
   const fields = f.fields.map((x) => ({ ...x, options: x.options?.length ? [...x.options] : [] }));
-  let title = f.title, cur = Math.min(active, fields.length - 1);
-  const blank = () => ({ label: "", hint: "", type: "text", required: false, options: [] });
+  let title = f.title;
+  sel = Math.min(sel, fields.length - 1);
+  const keep = () => ({ ...f, title, fields: fields.filter((x) => x.label.trim()) });
   const save = (approve) => act(async () => {
-    await api("/types/" + t.type_id + "/forms", send("PUT", { doc_name: f.doc_name, title, fields: fields.filter((x) => x.label.trim()) }));
+    await api("/types/" + t.type_id + "/forms", send("PUT", { doc_name: f.doc_name, title, fields: keep().fields }));
     if (approve) await api("/types/" + t.type_id + "/forms/approve", send("POST", { doc_name: f.doc_name }));
     staffHome();
   });
-  const reopen = (p) => formEditor(t, { ...f, title, fields: fields.filter((x) => x.label.trim() || x === fields[cur]) }, p, cur);
-  const status = f.status === "approved" ? "ใช้งานอยู่ การบันทึกมีผลกับนักวิจัยทันที" : "ฉบับร่าง นักวิจัยยังไม่เห็นจนกว่าจะอนุมัติ";
-  const bar = (right) => h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: previewing ? () => reopen(false) : staffHome }, previewing ? "← กลับไปแก้ไข" : "← กลับ"), h("span", { class: "tools" }, right));
-  if (previewing) {
-    show(bar(null), h("section", { class: "card" }, h("span", { class: "badge warn" }, "ตัวอย่าง: นักวิจัยจะเห็นแบบนี้"), h("h2", {}, title),
+  const seg = h("span", { class: "seg" },
+    h("button", { type: "button", class: preview ? "" : "on", onclick: () => preview && formEditor(t, keep(), false, sel) }, "แก้ไข"),
+    h("button", { type: "button", class: preview ? "on" : "", onclick: () => !preview && formEditor(t, keep(), true, sel) }, "ตัวอย่าง"));
+  const top = (right) => h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"), seg, h("span", { class: "tools" }, right));
+  if (preview) {
+    show(top(null), h("section", { class: "card pv" }, h("span", { class: "badge warn" }, "ตัวอย่าง: นักวิจัยจะเห็นแบบนี้"), h("h2", {}, title),
       h("div", { class: "fillform" }, fields.filter((x) => x.label.trim()).map((x) => fieldInput(x, undefined, true)))));
     return;
   }
-  const cards = h("div", { class: "qlist" });
-  const draw = () => cards.replaceChildren(...fields.map((x, i) => i === cur ? editCard(x, i) : viewCard(x, i)));
-  const viewCard = (x, i) => h("div", { class: "qcard", tabindex: 0, role: "button", onclick: () => { cur = i; draw(); }, onkeydown: (e) => { if (e.key === "Enter") { cur = i; draw(); } } },
-    fieldInput(x, undefined, true), h("span", { class: "qtype muted" }, FIELD_TYPES[x.type] + (x.required ? " · จำเป็น" : "")));
-  const optionRows = (x) => h("div", { class: "opts" }, x.options.map((o, j) => h("div", { class: "optrow" },
-    h("span", { class: "dot" }), h("input", { type: "text", value: o, "aria-label": "ตัวเลือก " + (j + 1), oninput: (e) => { x.options[j] = e.target.value; } }),
-    h("button", { class: "ghost", type: "button", "aria-label": "ลบตัวเลือก", onclick: () => { x.options.splice(j, 1); draw(); } }, "×"))),
-    h("button", { class: "ghost", type: "button", onclick: () => { x.options.push(""); draw(); } }, "+ เพิ่มตัวเลือก"));
-  const editCard = (x, i) => h("div", { class: "qcard on" },
-    h("div", { class: "fe-top" },
-      h("input", { type: "text", value: x.label, placeholder: "คำถาม / ชื่อช่อง", "aria-label": "ชื่อช่อง", oninput: (e) => { x.label = e.target.value; } }),
-      h("select", { class: "field", "aria-label": "ชนิดช่อง", onchange: (e) => { x.type = e.target.value; if (x.type === "choice" && x.options.length < 2) x.options = ["ตัวเลือก 1", "ตัวเลือก 2"]; draw(); } },
-        Object.entries(FIELD_TYPES).map(([k, v]) => h("option", { value: k, selected: k === x.type }, v)))),
-    h("input", { type: "text", value: x.hint || "", placeholder: "คำอธิบายใต้คำถาม (ไม่บังคับ)", "aria-label": "คำอธิบาย", oninput: (e) => { x.hint = e.target.value; } }),
-    x.type === "choice" ? optionRows(x) : h("p", { class: "muted sub" }, "ตัวอย่างช่อง: " + FIELD_TYPES[x.type]),
-    h("div", { class: "fe-foot" },
-      h("label", { class: "switch" }, h("input", { type: "checkbox", checked: !!x.required, onchange: (e) => { x.required = e.target.checked; } }), " จำเป็นต้องกรอก"),
-      h("span", { class: "tools" },
-        h("button", { class: "ghost", type: "button", "aria-label": "เลื่อนขึ้น", disabled: i === 0, onclick: () => { [fields[i - 1], fields[i]] = [fields[i], fields[i - 1]]; cur = i - 1; draw(); } }, "↑"),
-        h("button", { class: "ghost", type: "button", "aria-label": "เลื่อนลง", disabled: i === fields.length - 1, onclick: () => { [fields[i + 1], fields[i]] = [fields[i], fields[i + 1]]; cur = i + 1; draw(); } }, "↓"),
-        h("button", { class: "ghost", type: "button", onclick: () => { fields.splice(i + 1, 0, { ...x, options: [...x.options], key: undefined }); cur = i + 1; draw(); } }, "ทำซ้ำ"),
-        h("button", { class: "ghost danger", type: "button", onclick: () => { fields.splice(i, 1); cur = Math.min(cur, fields.length - 1); draw(); } }, "ลบ"))));
+  const status = f.status === "approved" ? "ใช้งานอยู่ การบันทึกมีผลกับนักวิจัยทันที" : "ฉบับร่าง นักวิจัยยังไม่เห็นจนกว่าจะอนุมัติ";
+  const list = h("div", { class: "card qlist" }), panel = h("div", { class: "card qpanel" }), labels = [];
+  const go = (i) => { sel = i; draw(); };
+  const swap = (i, j) => { [fields[i], fields[j]] = [fields[j], fields[i]]; go(j); };
+  const drawList = () => {
+    labels.length = 0;
+    list.replaceChildren(h("div", { class: "qrow head" }, h("span", {}, "#"), h("span", {}, "ช่อง"), h("span", {}, "ชนิด"), h("span", {}, "จำเป็น")),
+      ...fields.map((x, i) => {
+        const lab = h("span", { class: "qlabel" }, x.label || "(ยังไม่ตั้งชื่อ)");
+        labels.push(lab);
+        return h("button", { type: "button", class: "qrow" + (i === sel ? " sel" : ""), onclick: () => go(i) },
+          h("span", { class: "n" }, String(i + 1)), lab, h("span", { class: "qkind " + CHIP[x.type] }, FIELD_TYPES[x.type]), x.required ? h("span", { class: "reqmark" }, "จำเป็น") : h("span", { class: "dim" }, "ไม่จำเป็น"));
+      }),
+      h("button", { type: "button", class: "qadd", onclick: () => { fields.push({ label: "", hint: "", type: "text", required: false, options: [] }); go(fields.length - 1); } }, "+ เพิ่มช่อง"));
+  };
+  const drawPanel = () => {
+    const x = fields[sel];
+    if (!x) { panel.replaceChildren(h("p", { class: "muted" }, "ยังไม่มีช่อง กด “+ เพิ่มช่อง”")); return; }
+    panel.replaceChildren(...[h("h3", {}, "ช่องที่ " + (sel + 1)),
+      h("label", { class: "lbl" }, h("span", {}, "ชื่อช่อง"), h("input", { type: "text", value: x.label, oninput: (e) => { x.label = e.target.value; labels[sel].textContent = x.label || "(ยังไม่ตั้งชื่อ)"; } })),
+      h("label", { class: "lbl" }, h("span", {}, "คำอธิบายใต้ช่อง (ไม่บังคับ)"), h("input", { type: "text", value: x.hint || "", oninput: (e) => { x.hint = e.target.value; } })),
+      h("div", { class: "lbl" }, h("span", {}, "ชนิด"), h("div", { class: "types" }, Object.entries(FIELD_TYPES).map(([k, v]) => h("button", { type: "button", class: k === x.type ? "on" : "",
+        onclick: () => { x.type = k; if (k === "choice" && x.options.length < 2) x.options = ["ตัวเลือก 1", "ตัวเลือก 2"]; drawList(); drawPanel(); } }, v)))),
+      x.type === "choice" ? h("div", { class: "lbl" }, h("span", {}, "ตัวเลือก"), x.options.map((o, j) => h("div", { class: "optrow" }, h("span", { class: "dot" }),
+        h("input", { type: "text", value: o, "aria-label": "ตัวเลือก " + (j + 1), oninput: (e) => { x.options[j] = e.target.value; } }),
+        h("button", { class: "ghost", type: "button", "aria-label": "ลบตัวเลือก", onclick: () => { x.options.splice(j, 1); drawPanel(); } }, "×"))),
+        h("button", { class: "ghost", type: "button", onclick: () => { x.options.push(""); drawPanel(); } }, "+ เพิ่มตัวเลือก")) : null,
+      h("label", { class: "tog" }, h("span", {}, "จำเป็นต้องกรอก"), h("input", { type: "checkbox", class: "swx", checked: !!x.required, onchange: (e) => { x.required = e.target.checked; drawList(); } })),
+      h("div", { class: "tog" },
+        h("button", { class: "ghost danger", type: "button", onclick: () => { fields.splice(sel, 1); sel = Math.min(sel, fields.length - 1); draw(); } }, "ลบช่องนี้"),
+        h("span", { class: "tools" },
+          h("button", { class: "ghost", type: "button", "aria-label": "เลื่อนขึ้น", disabled: sel === 0, onclick: () => swap(sel, sel - 1) }, "↑"),
+          h("button", { class: "ghost", type: "button", "aria-label": "เลื่อนลง", disabled: sel === fields.length - 1, onclick: () => swap(sel, sel + 1) }, "↓"),
+          h("button", { class: "ghost", type: "button", onclick: () => { fields.splice(sel + 1, 0, { ...x, options: [...x.options], key: undefined }); go(sel + 1); } }, "ทำซ้ำ")))].filter(Boolean));
+  };
+  const draw = () => { drawList(); drawPanel(); };
   draw();
-  show(bar([h("button", { class: "ghost", type: "button", onclick: () => reopen(true) }, "ดูตัวอย่าง"), h("button", { class: "ghost", type: "button", onclick: save(false) }, "บันทึก"),
-      f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: save(true) }, "บันทึกและอนุมัติ") : null]),
-    h("section", { class: "card titlecard" }, h("input", { class: "formtitle", type: "text", value: title, "aria-label": "ชื่อแบบฟอร์ม", oninput: (e) => { title = e.target.value; } }),
-      h("p", { class: "muted sub" }, f.doc_name + " · " + t.type_name + " · " + status)),
-    cards,
-    h("div", { class: "addbar" }, h("button", { class: "primary", type: "button", onclick: () => { fields.push(blank()); cur = fields.length - 1; draw(); cards.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" }); } }, "+ เพิ่มคำถาม")));
+  show(top([h("button", { class: "ghost", type: "button", onclick: save(false) }, "บันทึก"), f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: save(true) }, "บันทึกและอนุมัติ") : null]),
+    h("div", { class: "qtitle" }, h("input", { class: "formtitle", type: "text", value: title, "aria-label": "ชื่อแบบฟอร์ม", oninput: (e) => { title = e.target.value; } }),
+      h("p", { class: "muted sub" }, f.doc_name + " · " + t.type_name + " · " + status + " · " + fields.length + " ช่อง")),
+    h("div", { class: "qgrid" }, list, panel));
 }
