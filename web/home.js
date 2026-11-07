@@ -169,7 +169,8 @@ async function researcherHome() {
     h("section", { class: "card" }, h("h2", {}, "สิ่งที่ต้องทำ"),
       todo.length ? todo.map((t) => h("div", { class: "todo " + t.kind },
         h("span", {}, h("b", {}, t.sub.title), " · ", t.doc, " ",
-          t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)")) : h("span", { class: "muted" }, "รอเจ้าหน้าที่ตรวจสอบ")),
+          t.kind === "returned" ? h("span", { class: "err" }, "ส่งกลับให้แก้ไข: " + (t.note || "(ไม่มีหมายเหตุ)"))
+            : h("span", { class: "muted" }, { send: "ตรวจสอบแล้ว พร้อมส่งให้เจ้าหน้าที่", fill: t.draft ? "แบบร่าง ยังกรอกไม่ครบ" : "ยังไม่ได้ส่ง ต้องกรอกหรืออัปโหลด", waiting: "รอเจ้าหน้าที่ตรวจสอบ" }[t.kind])),
         h("button", { class: "ghost", type: "button", onclick: () => document.getElementById("sub-" + t.sub.id).scrollIntoView({ behavior: "smooth" }) }, "ไปที่งานนี้")))
         : h("p", { class: "muted" }, "ไม่มีงานค้าง")),
     openPosts(posts, subs),
@@ -303,7 +304,7 @@ async function staffQueue(body, q, subs) {
     const rv = reviewBlock(u, u.staff_id === me.id, staffHome);
     const ai = u.findings.length ? h("span", { class: "badge warn" }, "AI พบ " + u.findings.length + " ข้อ") : h("span", { class: "badge ok" }, "AI ไม่พบข้อสังเกต (หรือตรวจสอบไม่ได้)");
     return h("div", { class: "doc" }, h("div", { class: "between" }, h("span", {}, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, "· " + u.submission_title)), ai),
-      h("p", { class: "muted sub" }, "ผู้รับผิดชอบ " + u.staff_id + " · ส่ง " + agoText(u.created, now)), " ",
+      h("p", { class: "muted sub" }, "ผู้รับผิดชอบ " + (users.find((x) => x.id === u.staff_id)?.name || u.staff_id) + " · ส่ง " + agoText(u.created, now)), " ",
       u.answers.length ? answersView(u) : h("a", { href: "/api/track/uploads/" + u.id + "/file", target: "_blank" }, "เปิดไฟล์ " + u.filename),
       ...rv);
   })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ยังไม่มีเอกสารรอตรวจสอบ"), h("p", { class: "muted" }, "เมื่อมีนักวิจัยส่งเอกสารเพื่อตรวจสอบ รายการจะแสดงที่นี่"))].filter(Boolean));

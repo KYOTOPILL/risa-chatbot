@@ -21,7 +21,14 @@ function fieldInput(f, value, readOnly = false) {
 // researcher: fill, save (AI checks the answers), send. Until it is sent the form stays editable and saving again replaces the answers.
 function formFill(sub, name, def, up, reload) {
   const old = Object.fromEntries((up?.answers || []).map((a) => [a.key, a.value]));
-  const inputs = def.fields.map((f) => fieldInput(f, old[f.key]));
+  // what is typed is kept in this browser as it is typed (not files), so a reload or an expired login does not lose a long form
+  const key = "risa-form-" + me.id + "-" + sub.id + "-" + name;
+  let kept = {};
+  try { kept = JSON.parse(localStorage.getItem(key) || "{}"); } catch { /* unreadable copy: ignore */ }
+  const restored = def.fields.some((f) => f.type !== "file" && f.key in kept);
+  const inputs = def.fields.map((f) => fieldInput(f, f.type !== "file" && f.key in kept ? kept[f.key] : old[f.key]));
+  const keepCopy = () => { try { localStorage.setItem(key, JSON.stringify(Object.fromEntries(def.fields.flatMap((f, i) => f.type === "file" ? [] : [[f.key, inputs[i].get()]])))); } catch { /* storage full or blocked: skip */ } };
+  const forget = () => { try { localStorage.removeItem(key); } catch { /* nothing to remove */ } };
   const save = (ev, draft) => {
     const missing = draft ? -1 : def.fields.findIndex((f, i) => f.required && (f.type === "file" ? !inputs[i].get() && !old[f.key] : !String(inputs[i].get()).trim()));
     if (missing >= 0) { alert("กรุณากรอก: " + def.fields[missing].label); return; }  // before the progress panel: it would replace the form and lose what was typed
@@ -31,12 +38,15 @@ function formFill(sub, name, def, up, reload) {
       if (f.type === "file") { if (v) { fd.append("file_keys", f.key); fd.append("files", v); } } else answers[f.key] = v;
     });
     fd.append("doc_name", name); fd.append("answers", JSON.stringify(answers));
-    if (draft) return act(async () => { fd.append("draft", "true"); await api("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }); reload(); })(ev);  // kept as is: no AI check, no required fields
-    runProgress(ev.target, "กำลังบันทึกและตรวจสอบ “" + def.title + "”", (say) => apiStream("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }, say), reload, reload);
+    if (draft) return act(async () => { fd.append("draft", "true"); await api("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }); forget(); reload(); })(ev);  // kept as is: no AI check, no required fields
+    runProgress(ev.target, "กำลังบันทึกและตรวจสอบ “" + def.title + "”", (say) => apiStream("/submissions/" + sub.id + "/forms", { method: "POST", body: fd }, say), () => { forget(); reload(); }, reload);
   };
-  return h("div", { class: "fillform" }, inputs, h("div", { class: "actions end" },
+  const box = h("div", { class: "fillform" }, restored ? h("p", { class: "muted sub" }, "กู้คืนข้อมูลที่พิมพ์ค้างไว้ในเครื่องนี้แล้ว ยังไม่ได้บันทึกขึ้นระบบ") : null, inputs, h("div", { class: "actions end" },
     h("button", { class: "ghost", type: "button", onclick: (ev) => save(ev, true) }, "บันทึกแบบร่าง (ยังไม่ตรวจสอบ)"),
     h("button", { class: "primary", type: "button", onclick: (ev) => save(ev, false) }, up && up.status !== "draft" ? "บันทึกใหม่และให้ AI ตรวจสอบ" : "บันทึกและให้ AI ตรวจสอบ")));
+  box.addEventListener("input", keepCopy);
+  box.addEventListener("change", keepCopy);
+  return box;
 }
 
 // what was filled in: staff review and the researcher's own sent form

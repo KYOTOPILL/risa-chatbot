@@ -23,7 +23,19 @@ def up(status, id_=1, note=""):
 
 
 def test_empty_when_nothing_pending():
-    assert run([sub(1, [up("approved")]), sub(2, [])]) == []
+    assert run([sub(1, [up("approved")])]) == []
+
+
+def test_unsent_documents_are_to_do_in_order_returned_send_fill_waiting():
+    got = run([sub(1, []), sub(2, [up("sent")]), sub(3, [up("screened")]), sub(4, [up("returned")]), sub(5, [up("draft")])])
+    assert [(g["kind"], g["sub"]["id"]) for g in got] == [("returned", 4), ("send", 3), ("fill", 1), ("fill", 5), ("waiting", 2)]
+    assert [g["draft"] for g in got if g["kind"] == "fill"] == [False, True]
+
+
+def test_finished_request_has_no_to_do():
+    s = sub(1, [])
+    s["current_step"], s["step_count"] = 1, 1
+    assert run([s]) == []
 
 
 def test_returned_comes_before_waiting_across_submissions():
