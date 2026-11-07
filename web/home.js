@@ -258,7 +258,7 @@ async function boot() {
   logout.hidden = !me;
   document.getElementById("chatlink").hidden = !me;
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
-  if (!me) { tab = "queue"; return loginScreen().catch(fail); }  // the next staff member starts on the inbox
+  if (!me) { tab = "queue"; return loginScreen(); }  // the next staff member starts on the inbox
   users = await api("/mock-users");
   await (me.role === "staff" ? staffHome : researcherHome)();
   if (me.role === "researcher") chatDrawer();
