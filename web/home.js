@@ -319,7 +319,7 @@ async function boot() {
   const logout = document.getElementById("logout");
   document.getElementById("who").replaceChildren(...(me ? [h("span", { class: "av" }, me.name[0].toUpperCase()), h("span", {}, me.name, h("small", {}, ROLE[me.role]))] : []));
   logout.hidden = !me;
-  document.getElementById("chatlink").hidden = !me;
+  document.getElementById("chatlink").hidden = !me || me.role !== "researcher";  // staff do not use the chat
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
   if (!me) { tab = "queue"; return loginScreen(); }  // the next staff member starts on the inbox
   users = await api("/mock-users");

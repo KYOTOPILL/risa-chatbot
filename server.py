@@ -5,17 +5,19 @@ import threading
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 from typing_extensions import Annotated
 
 import admin
+import my_requests
 import tracker_api
 import downloads
 import rag
 import state
+from auth import User, current_user, require_researcher
 from config import CONTENT_DIR, ROOT
 
 log = logging.getLogger("chatbot")
@@ -54,7 +56,7 @@ app.include_router(tracker_api.router)
 
 
 @app.post("/api/chat")
-def chat(body: ChatIn, request: Request):
+def chat(body: ChatIn, request: Request, user: User = Depends(require_researcher)):
     history = [rag.Turn(t.role, t.content) for t in body.history]
     key = " ".join(body.message.split()).casefold() if not history else None
     try:
@@ -63,8 +65,8 @@ def chat(body: ChatIn, request: Request):
             with state.slot(request.client.host if request.client else "") as ok:
                 if not ok:  # this IP already has its allowed questions being answered
                     return JSONResponse({"text": BUSY_TEXT, "files": []}, status_code=429)
-                reply = rag.answer(history, body.message, state.get_store())
-            if key and len(state.cache) < state.CACHE_MAX:  # full: stop adding, a reindex clears it
+                reply = rag.answer(history, body.message, state.get_store(), me=lambda: my_requests.describe(state.get_tracker(), user.id))
+            if key and not reply.personal and len(state.cache) < state.CACHE_MAX:  # full: stop adding, a reindex clears it
                 state.cache[key] = reply
     except Exception:
         log.exception("answer failed")
@@ -87,7 +89,7 @@ def _payload(message: str, reply: rag.Reply) -> dict:
 
 
 @app.post("/api/chat/stream")
-def chat_stream(body: ChatIn, request: Request):
+def chat_stream(body: ChatIn, request: Request, user: User = Depends(require_researcher)):
     """Same answer as /api/chat, sent as JSON lines: {"status": text} while tools run, {"delta": text} while the answer is written ({"delta": null} = discard
     the text so far), then {"done": true, "text", "files"} with the final text, or {"error": text}."""
     history = [rag.Turn(t.role, t.content) for t in body.history]
@@ -108,7 +110,8 @@ def chat_stream(body: ChatIn, request: Request):
                             return
                         q.put(("reply", rag.answer(history, body.message, state.get_store(), llm=rag.chat_tools_stream,
                                                    on_delta=lambda d: q.put(("delta", d)),
-                                                   on_status=lambda t: q.put(("status", t)))))
+                                                   on_status=lambda t: q.put(("status", t)),
+                                                   me=lambda: my_requests.describe(state.get_tracker(), user.id))))
                 except Exception:
                     log.exception("answer failed")
                     q.put(("error", ERROR_TEXT))
@@ -124,7 +127,7 @@ def chat_stream(body: ChatIn, request: Request):
                 else:
                     reply = val
                     break
-            if key and len(state.cache) < state.CACHE_MAX:
+            if key and not reply.personal and len(state.cache) < state.CACHE_MAX:
                 state.cache[key] = reply
         try:
             yield line({"done": True, **_payload(body.message, reply)})
@@ -149,7 +152,12 @@ def home():
 
 
 @app.get("/chat")
-def chat_page():
+def chat_page(request: Request):
+    """The chat is for logged-in researchers. Everyone else goes to the login or to their own workspace."""
+    try:
+        require_researcher(current_user(request))
+    except HTTPException:
+        return RedirectResponse("/")
     return FileResponse(WEB / "index.html")
 
 

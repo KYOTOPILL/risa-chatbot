@@ -275,3 +275,31 @@ def test_answer_reports_status_for_each_tool_and_before_writing():
         def categories(self): return []
     rag.answer([], "ลา", S(), llm=lambda m, t, c: next(calls), on_status=seen.append)
     assert seen == ["กำลังค้นหาในเอกสาร “ลา”...", "กำลังเรียบเรียงคำตอบ..."]
+
+
+def test_my_requests_tool_is_offered_only_with_me_and_marks_the_reply_personal():
+    seen = []
+
+    def llm(messages, tools=None, tool_choice="auto", *a):
+        seen.append([t["function"]["name"] for t in tools or []])
+        if len(seen) == 1:
+            return {"content": None, "tool_calls": [{"id": "1", "type": "function", "function": {"name": "my_requests", "arguments": "{}"}}]}
+        assert "ขั้นตอนปัจจุบัน 1/2" in messages[-1]["content"]  # the tool result reached the model
+        return {"content": "คุณอยู่ขั้นที่ 1 ค่ะ"}
+    r = answer([], "ฉันอยู่ขั้นไหน", FakeStore(), llm=llm, me=lambda: "ขั้นตอนปัจจุบัน 1/2")
+    assert "my_requests" in seen[0] and r.personal is True and r.text.startswith("คุณอยู่")
+    plain = []
+    answer([], "ลากี่วัน", FakeStore(), llm=lambda m, t=None, c="auto", *a: (plain.append([x["function"]["name"] for x in t]), {"content": "ลา 10 วันค่ะ"})[1])
+    assert "my_requests" not in plain[0]
+
+
+def test_my_requests_without_me_is_an_unknown_tool_and_never_personal():
+    calls = []
+
+    def llm(messages, tools=None, tool_choice="auto", *a):
+        calls.append(messages[-1]["content"])
+        if len(calls) == 1:
+            return {"content": None, "tool_calls": [{"id": "1", "type": "function", "function": {"name": "my_requests", "arguments": "{}"}}]}
+        return {"content": "ไม่ทราบค่ะ"}
+    r = answer([], "ฉันอยู่ขั้นไหน", FakeStore(), llm=llm)
+    assert calls[-1] == "Unknown tool." and r.personal is False

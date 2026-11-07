@@ -90,6 +90,7 @@ async function ask(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, history: history.slice(-12) }),
     });
+    if (res.status === 401 || res.status === 403) return void (location.href = "/");  // logged out or not a researcher
     if (!res.ok || !res.body) {
       const data = await res.json().catch(() => ({}));
       return fail(data.text || "ขออภัย ส่งคำถามไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");

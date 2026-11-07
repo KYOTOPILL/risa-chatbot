@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import rag
 import server
 import state
+from creds import CREDS
 
 
 class FakeStore:
@@ -27,7 +28,9 @@ def clean_cache():
 @pytest.fixture
 def client():
     with patch.object(state, "get_store", return_value=FakeStore()):
-        yield TestClient(server.app)
+        c = TestClient(server.app)
+        assert c.post("/api/track/login", json=CREDS["r1"]).status_code == 200  # the chat is for logged-in researchers
+        yield c
 
 
 def post(client, message="ลากี่วัน", history=None):
@@ -41,7 +44,7 @@ def test_chat_questions_run_in_parallel(client):
     running = peak = 0
     guard = threading.Lock()
 
-    def slow_answer(history, message, store):
+    def slow_answer(history, message, store, **kw):
         nonlocal running, peak
         with guard:
             running += 1
@@ -65,7 +68,7 @@ def test_one_ip_cannot_flood_but_can_keep_asking(client, monkeypatch):
     monkeypatch.setattr("config.MAX_INFLIGHT", 2)
     codes = []
 
-    def slow(history, message, store):
+    def slow(history, message, store, **kw):
         time.sleep(0.3)
         return rag.Reply("ok")
 
@@ -200,7 +203,7 @@ def stream(client, message="ลากี่วัน", history=None):
 
 
 def test_stream_sends_deltas_then_the_final_text_and_files(client):
-    def fake(history, message, store, llm=None, on_delta=None, on_status=None):
+    def fake(history, message, store, llm=None, on_delta=None, on_status=None, me=None):
         on_status("กำลังค้นหา...")
         on_delta("ลา"), on_delta("พักร้อน")
         return rag.Reply("ลาพักร้อน 10 วัน", [], [])
@@ -230,3 +233,40 @@ def test_pages_are_mobile_ready(client, path):
     html = client.get(path).text
     assert "width=device-width" in html and "viewport-fit=cover" in html
     assert 'name="theme-color"' in html  # tints the phone's address bar
+
+
+# ---- the chat is tied to the account ----
+@pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream"])
+def test_chat_api_needs_a_researcher(path):
+    body = {"message": "ลากี่วัน", "history": []}
+    anon = TestClient(server.app)
+    assert anon.post(path, json=body).status_code == 401
+    staff = TestClient(server.app)
+    staff.post("/api/track/login", json=CREDS["s1"])
+    assert staff.post(path, json=body).status_code == 403
+
+
+def test_chat_page_is_for_researchers_others_go_home(client):
+    assert client.get("/chat", follow_redirects=False).status_code == 200
+    staff = TestClient(server.app)
+    staff.post("/api/track/login", json=CREDS["s1"])
+    for c in (TestClient(server.app), staff):
+        r = c.get("/chat", follow_redirects=False)
+        assert r.status_code == 307 and r.headers["location"] == "/"
+
+
+def test_answer_gets_the_askers_own_requests_and_a_personal_reply_is_not_cached(client, tmp_path):
+    import tracker
+    tk = tracker.Tracker(tmp_path / "t.db")
+    v = tk.create_type("Grant", [{"title": "Submit", "documents": ["Form A"], "page": 1, "unsure": False}], "g.pdf")
+    tk.approve(v)
+    tk.create_submission("Grant - Somchai", v, ["r1"], "s1")
+    seen = []
+
+    def fake(history, message, store, llm=None, on_delta=None, on_status=None, me=None):
+        seen.append(me())
+        return rag.Reply("ตอบ", personal=True)
+    with patch.object(state, "get_tracker", return_value=tk), patch("rag.answer", fake):
+        post(client, "ฉันอยู่ขั้นไหน")
+        post(client, "ฉันอยู่ขั้นไหน")
+    assert len(seen) == 2 and "Grant - Somchai" in seen[0] and "Form A: ยังไม่ได้ส่ง" in seen[0]  # asked twice: the personal reply was not cached

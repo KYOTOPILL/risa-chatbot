@@ -42,3 +42,9 @@ def require_staff(user: User = Depends(current_user)) -> User:
     if user.role != "staff":
         raise HTTPException(403, "staff only")
     return user
+
+
+def require_researcher(user: User = Depends(current_user)) -> User:
+    if user.role != "researcher":
+        raise HTTPException(403, "researchers only")
+    return user
