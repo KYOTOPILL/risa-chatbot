@@ -110,7 +110,7 @@ let filesRoot = null, filesTab = null;  // the file manager: built once, kept in
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
-  const items = [["queue", "queue", "รอตรวจ", queue.length], ["subs", "list", "ทุกงาน"], null, ["types", "types", "ประเภททุน"], ["files", "folder", "เอกสารสำหรับแชท"]];
+  const items = [["queue", "queue", "รอตรวจ", queue.length], ["subs", "list", "ทุกงาน"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "เอกสารสำหรับแชท"]];
   const body = h("div", { class: "ws-main" });
   const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; staffHome(); } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
@@ -129,7 +129,7 @@ async function staffFiles(body) {
 async function staffSubs(body) {
   const [subs, types] = await Promise.all([api("/submissions"), api("/types")]);
   const approved = types.filter((t) => t.status === "approved");
-  const title = h("input", { type: "text", placeholder: "ชื่องาน เช่น ทุน CMU - สมชาย" });
+  const title = h("input", { type: "text", placeholder: "ชื่องาน เช่น ขอทุน CMU - สมชาย หรือ ขอเบิกค่าเดินทาง - นิดา" });
   const type = h("select", { class: "field" }, approved.map((t) => h("option", { value: t.id }, t.type_name + " (v" + t.version + ")")));
   const researchers = users.filter((u) => u.role === "researcher").map((u) => h("label", { class: "check" }, h("input", { type: "checkbox", value: u.id }), " " + u.name));
   const staffSel = h("select", { class: "field" }, users.filter((u) => u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === me.id }, u.name)));
@@ -144,7 +144,7 @@ async function staffSubs(body) {
           const ids = [...body.querySelectorAll(".checks input:checked")].map((c) => c.value);
           await api("/submissions", send("POST", { title: title.value.trim(), version_id: +type.value, researcher_ids: ids, staff_id: staffSel.value }));
           staffHome();
-        }) }, "สร้างงาน")) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภททุน)")));
+        }) }, "สร้างงาน")) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภทงาน)")));
 }
 
 async function staffDetail(sid) {
@@ -188,7 +188,7 @@ async function staffQueue(body, q, subs) {
 
 async function staffTypes(body) {
   const types = await api("/types");
-  const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน เช่น ทุน CMU Presidential" });
+  const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง, ขออนุมัติจริยธรรมการวิจัย" });
   const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
@@ -196,7 +196,7 @@ async function staffTypes(body) {
     draftEditor(out.version_id);
   }) });
   body.append(
-    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดเอกสารของทุน แล้ว AI จะร่างขั้นตอนให้ตรวจก่อนใช้งานจริง"), name, h("div", { class: "actions" }, pick,
+    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI จะร่างขั้นตอนและเอกสารที่ต้องส่งให้ตรวจก่อนใช้งานจริง"), name, h("div", { class: "actions" }, pick,
       h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารและให้ AI ร่างขั้นตอน"))),
     h("section", { class: "card" }, h("h2", {}, "ประเภทงานทั้งหมด"), types.map((t) => h("div", { class: "list-row" },
       h("span", {}, t.type_name, " v" + t.version, " ", h("span", { class: "muted" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : "ใช้งานอยู่ · " + t.steps.length + " ขั้นตอน")),
