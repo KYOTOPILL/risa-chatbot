@@ -76,7 +76,7 @@ function docRow(sub, name, reload) {
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)")) : null,
     h("div", { class: "actions" }, pick,
-      h("a", { class: "ghost", href: "/api/track/submissions/" + sub.id + "/form?doc=" + encodeURIComponent(name), title: "ถ้ายังไม่มีแบบฟอร์มทางการ AI จะร่างให้ ตรวจกับแบบฟอร์มจริงก่อนส่ง" }, "ดาวน์โหลดแบบฟอร์มเปล่า"),
+      sub.forms.includes(name) ? h("a", { class: "ghost", href: "/api/track/submissions/" + sub.id + "/form?doc=" + encodeURIComponent(name) }, "ดาวน์โหลดแบบฟอร์มเปล่า") : null,
       h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"),
       canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจ") : null));
 }
@@ -201,7 +201,65 @@ async function staffTypes(body) {
       h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารและให้ AI ร่างขั้นตอน"))),
     h("section", { class: "card" }, h("h2", {}, "ประเภทงานทั้งหมด"), types.map((t) => h("div", { class: "list-row" },
       h("span", {}, t.type_name, " v" + t.version, " ", h("span", { class: "muted" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : "ใช้งานอยู่ · " + t.steps.length + " ขั้นตอน")),
-      t.status === "draft" ? h("button", { class: "ghost", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจและอนุมัติ") : newVersionButton(t)))));
+      t.status === "draft" ? h("button", { class: "ghost", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจและอนุมัติ")
+        : h("span", { class: "tools" }, h("button", { class: "ghost", type: "button", onclick: act(() => formsManager(t)) }, "แบบฟอร์ม"), newVersionButton(t))))));
+}
+
+// ---------- blank forms: AI drafts, staff edit and approve, researchers download only approved ones ----------
+const FORM_STATUS = (f) => !f ? "ยังไม่มีแบบฟอร์ม" : f.has_file ? "ไฟล์จริงของหน่วยงาน · นักวิจัยดาวน์โหลดได้" : f.status === "approved" ? "อนุมัติแล้ว · นักวิจัยดาวน์โหลดได้" : "ฉบับร่าง · นักวิจัยยังไม่เห็น";
+
+async function formsManager(t) {
+  const by = Object.fromEntries((await api("/types/" + t.type_id + "/forms")).map((f) => [f.doc_name, f]));
+  const docs = [...new Set(t.steps.flatMap((s) => s.documents))];
+  const row = (doc) => {
+    const f = by[doc], again = () => formsManager(t).catch(fail);
+    const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: act(async (ev) => {
+      if (!ev.target.files[0]) return;
+      await api("/types/" + t.type_id + "/forms/upload", form({ doc_name: doc, file: ev.target.files[0] }));
+      again();
+    }) });
+    const aiBtn = h("button", { class: "ghost", type: "button", onclick: act(async (ev) => {
+      if (f && !confirm("ให้ AI ร่างใหม่? แบบฟอร์มเดิมของเอกสารนี้จะถูกแทนที่")) return;
+      ev.target.disabled = true; ev.target.textContent = "AI กำลังร่าง…";
+      try { await api("/types/" + t.type_id + "/forms/draft", send("POST", { doc_name: doc })); } finally { again(); }
+    }) }, f ? "ให้ AI ร่างใหม่" : "ให้ AI ร่างแบบฟอร์ม");
+    return h("div", { class: "list-row" }, h("span", {}, h("b", {}, doc), " ", h("span", { class: "muted" }, FORM_STATUS(f))),
+      h("span", { class: "tools" }, pick, aiBtn,
+        f && !f.has_file ? h("button", { class: "ghost", type: "button", onclick: () => formEditor(t, f) }, "แก้ไข") : null,
+        f && f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/forms/approve", send("POST", { doc_name: doc })); again(); }) }, "อนุมัติ") : null,
+        h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, "อัปโหลดแบบฟอร์มจริง")));
+  };
+  show(h("button", { class: "ghost", type: "button", onclick: () => { tab = "types"; staffHome(); } }, "← กลับ"),
+    h("section", { class: "card" }, h("h2", {}, "แบบฟอร์มของ " + t.type_name),
+      h("p", { class: "muted" }, "AI ร่างแบบฟอร์มเปล่าให้ แล้วเจ้าหน้าที่แก้ไขและอนุมัติ นักวิจัยจะเห็นปุ่มดาวน์โหลดเมื่ออนุมัติแล้วเท่านั้น และ AI ใช้ช่องในแบบฟอร์มนี้ตรวจเอกสารที่ส่งมา"),
+      docs.length ? docs.map(row) : h("p", { class: "muted" }, "ประเภทงานนี้ไม่มีเอกสารที่ต้องส่ง")));
+}
+
+function formEditor(t, f) {
+  const fields = f.fields.map((x) => ({ ...x }));
+  let title = f.title;
+  const box = h("div");
+  const draw = () => box.replaceChildren(...fields.map((x, i) => h("div", { class: "fieldrow" },
+    h("input", { type: "text", value: x.label, placeholder: "ชื่อช่อง", "aria-label": "ชื่อช่อง " + (i + 1), oninput: (e) => { x.label = e.target.value; } }),
+    h("input", { type: "text", value: x.hint, placeholder: "คำอธิบายใต้ช่อง (ไม่บังคับ)", "aria-label": "คำอธิบาย " + (i + 1), oninput: (e) => { x.hint = e.target.value; } }),
+    h("button", { class: "ghost", type: "button", "aria-label": "เลื่อนขึ้น", disabled: i === 0, onclick: () => { [fields[i - 1], fields[i]] = [fields[i], fields[i - 1]]; draw(); } }, "↑"),
+    h("button", { class: "ghost", type: "button", "aria-label": "เลื่อนลง", disabled: i === fields.length - 1, onclick: () => { [fields[i + 1], fields[i]] = [fields[i], fields[i + 1]]; draw(); } }, "↓"),
+    h("button", { class: "ghost danger", type: "button", "aria-label": "ลบช่อง", onclick: () => { fields.splice(i, 1); draw(); } }, "ลบ"))));
+  draw();
+  const save = (approve) => act(async () => {
+    const body = { doc_name: f.doc_name, title, fields: fields.filter((x) => x.label.trim()) };
+    await api("/types/" + t.type_id + "/forms", send("PUT", body));
+    if (approve) await api("/types/" + t.type_id + "/forms/approve", send("POST", { doc_name: f.doc_name }));
+    formsManager(t).catch(fail);
+  });
+  show(h("button", { class: "ghost", type: "button", onclick: () => formsManager(t).catch(fail) }, "← กลับ"),
+    h("section", { class: "card" }, h("h2", {}, "แก้ไขแบบฟอร์ม: " + f.doc_name),
+      h("p", { class: "muted" }, f.status === "approved" ? "แบบฟอร์มนี้อนุมัติแล้ว การบันทึกมีผลกับนักวิจัยทันที" : "ฉบับร่าง นักวิจัยยังไม่เห็นจนกว่าจะอนุมัติ"),
+      h("label", {}, "ชื่อแบบฟอร์ม", h("input", { type: "text", value: title, oninput: (e) => { title = e.target.value; } })), box,
+      h("div", { class: "actions" },
+        h("button", { class: "ghost", type: "button", onclick: () => { fields.push({ label: "", hint: "" }); draw(); } }, "+ เพิ่มช่อง"),
+        h("button", { class: "ghost", type: "button", onclick: save(false) }, "บันทึก"),
+        f.status === "draft" ? h("button", { class: "primary", type: "button", onclick: save(true) }, "บันทึกและอนุมัติ") : null)));
 }
 
 function newVersionButton(t) {

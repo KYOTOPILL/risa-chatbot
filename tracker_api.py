@@ -1,8 +1,9 @@
 """Tracking dashboard API: mock login, submissions, step moves. Rules live in tracker.py; this only maps users and HTTP."""
-import hashlib
+import io
 import re
 import secrets
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -81,7 +82,8 @@ def submission(sid: int, user: User = Depends(current_user)):
     sub = state.get_tracker().get_submission(sid, user.id, user.role)
     if sub is None:  # missing and not-yours look the same
         raise HTTPException(404, "not found")
-    return sub
+    docs = [d for st in sub["steps"] for d in st["documents"]]
+    return {**sub, "forms": [d for d in docs if _blank_form(sub["type_id"], d)]}
 
 
 @router.post("/submissions")
@@ -203,6 +205,16 @@ def _own_submission(sid: int, user: User) -> dict:
     return sub
 
 
+def _reference_text(type_id: int, doc: str) -> str | None:
+    """What the checker compares an upload with: the approved form's fields or file, else a template file."""
+    f = _blank_form(type_id, doc)
+    if f is None:
+        return None
+    if f["file_path"]:
+        return extract_text(Path(f["file_path"]))
+    return f["title"] + "\n" + "\n".join(x["label"] + (f" ({x['hint']})" if x.get("hint") else "") for x in f["fields"])
+
+
 @router.post("/submissions/{sid}/uploads")
 def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), user: User = Depends(current_user)):
     sub = _own_submission(sid, user)
@@ -219,8 +231,7 @@ def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), us
     try:
         text = extract_text(path)
         if text:
-            tpl = find_template(doc_name)
-            findings = screen_document(text, step, doc_name, extract_text(tpl) if tpl else None, llm=llm)
+            findings = screen_document(text, step, doc_name, _reference_text(sub["type_id"], doc_name), llm=llm)
             status = "screened"
     except Exception:  # unreadable file or bad model output: report "cannot check", keep the upload
         findings, status = None, "cannot_check"
@@ -228,25 +239,106 @@ def upload(sid: int, doc_name: str = Form(...), file: UploadFile = File(...), us
     return {"upload_id": uid, "status": status, "findings": findings or []}
 
 
+def _doc_step(sub_or_version: dict, doc: str) -> dict | None:
+    return next((s for s in sub_or_version["steps"] if doc in s["documents"]), None)
+
+
+def _blank_form(type_id: int, doc: str):
+    """Approved staff form first, then a file in the Form template folder. None when the researcher has nothing to download."""
+    f = state.get_tracker().get_form(type_id, doc)
+    if f and f["status"] == "approved":
+        return f
+    tpl = find_template(doc)
+    return {"file_path": str(tpl), "title": doc, "fields": [], "status": "approved"} if tpl else None
+
+
 @router.get("/submissions/{sid}/form")
 def blank_form(sid: int, doc: str, user: User = Depends(current_user)):
-    """Blank form for one document of the submission: the official template if there is one, else an AI-made .docx (made once, kept on disk)."""
     sub = state.get_tracker().get_submission(sid, user.id, user.role)
     if sub is None:
         raise HTTPException(404, "not found")
-    step = next((s for s in sub["steps"] if doc in s["documents"]), None)
-    if step is None:
+    if _doc_step(sub, doc) is None:
         raise HTTPException(400, "not a document of this submission")
-    tpl = find_template(doc)
-    if tpl:
-        return FileResponse(tpl, filename=tpl.name)
-    path = UPLOAD_DIR / "forms" / (hashlib.sha1(f"{sub['type_name']}\0{doc}".encode()).hexdigest()[:16] + ".docx")
-    if not path.exists():
-        try:
-            build_docx(draft_form(doc, step, sub["type_name"], llm=llm), path)
-        except Exception as e:  # bad model output or model unreachable: nothing is saved, the next try asks again
-            raise HTTPException(502, f"could not draft the form: {e}")
-    return FileResponse(path, filename=re.sub(r'[\\/:*?"<>|]', "_", doc) + ".docx")  # keep Thai vowel marks, drop only characters a file name cannot hold
+    f = _blank_form(sub["type_id"], doc)
+    if f is None:
+        raise HTTPException(404, "no approved form for this document")
+    name = re.sub(r'[\\/:*?"<>|]', "_", doc)  # keep Thai vowel marks, drop only characters a file name cannot hold
+    if f["file_path"]:
+        return FileResponse(f["file_path"], filename=name + Path(f["file_path"]).suffix)
+    buf = io.BytesIO()
+    build_docx(f, buf)
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(name)}.docx"})
+
+
+# ---- staff: draft, edit, approve the blank form of each document of a type ----
+class FormRef(BaseModel):
+    doc_name: str
+
+
+class FormIn(FormRef):
+    title: str
+    fields: list[dict]
+
+
+def _type_version(type_id: int) -> dict:
+    tk = state.get_tracker()
+    v = next((v for v in tk.list_types() + tk.list_drafts() if v["type_id"] == type_id), None)
+    if v is None:
+        raise HTTPException(404, "no such type")
+    return v
+
+
+def _known_doc(type_id: int, doc: str) -> tuple[dict, dict]:
+    v = _type_version(type_id)
+    step = _doc_step(v, doc)
+    if step is None:
+        raise HTTPException(400, "not a document of this type")
+    return v, step
+
+
+@router.get("/types/{type_id}/forms")
+def list_forms(type_id: int, _: User = Depends(require_staff)):
+    return [{k: v for k, v in f.items() if k != "file_path"} | {"has_file": bool(f["file_path"])} for f in state.get_tracker().list_forms(type_id)]
+
+
+@router.post("/types/{type_id}/forms/draft")
+def draft_type_form(type_id: int, body: FormRef, _: User = Depends(require_staff)):
+    v, step = _known_doc(type_id, body.doc_name)
+    try:
+        form = draft_form(body.doc_name, step, v["type_name"], llm=llm)
+    except Exception as e:  # bad model output or model unreachable: nothing is saved
+        raise HTTPException(502, f"could not draft the form: {e}")
+    state.get_tracker().put_form(type_id, body.doc_name, form["title"], form["fields"])
+    return {"doc_name": body.doc_name, "status": "draft", **form}
+
+
+@router.put("/types/{type_id}/forms")
+def edit_form(type_id: int, body: FormIn, _: User = Depends(require_staff)):
+    _known_doc(type_id, body.doc_name)
+    tk = state.get_tracker()
+    old = tk.get_form(type_id, body.doc_name)
+    try:  # an approved form stays approved after an edit: the editor is staff
+        tk.put_form(type_id, body.doc_name, body.title, body.fields, old["status"] if old else "draft", old["file_path"] if old else "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@router.post("/types/{type_id}/forms/approve")
+def approve_form(type_id: int, body: FormRef, _: User = Depends(require_staff)):
+    if not state.get_tracker().approve_form(type_id, body.doc_name):
+        raise HTTPException(404, "draft a form first")
+    return {"ok": True}
+
+
+@router.post("/types/{type_id}/forms/upload")
+def upload_form(type_id: int, doc_name: str = Form(...), file: UploadFile = File(...), _: User = Depends(require_staff)):
+    """An official form file replaces the AI draft and is approved at once: staff supplied it."""
+    _known_doc(type_id, doc_name)
+    path = _save_upload(file, "forms/official")
+    state.get_tracker().put_form(type_id, doc_name, doc_name, [], "approved", str(path))
+    return {"doc_name": doc_name, "status": "approved"}
 
 
 @router.post("/uploads/{uid}/send")

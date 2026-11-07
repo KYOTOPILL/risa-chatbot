@@ -189,3 +189,5 @@ dialog { max-width: calc(100vw - 32px); }
   .navitem { flex: 1 1 calc(50% - 8px); border: 1px solid var(--line); }  /* four menu buttons as a 2x2 grid */
   .chat-drawer { width: 100vw; height: 100dvh; bottom: auto; border-left: 0; }  /* dvh: the address bar must not hide the composer */
 }
+.fieldrow { display: grid; grid-template-columns: 1fr 1fr auto auto auto; gap: 8px; margin-top: 8px; align-items: center; }
+@media (max-width: 700px) { .fieldrow { grid-template-columns: 1fr 1fr 1fr; } .fieldrow input { grid-column: 1 / -1; } }

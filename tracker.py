@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS step_events (
     id INTEGER PRIMARY KEY, submission_id INTEGER NOT NULL REFERENCES submissions(id),
     from_step INTEGER NOT NULL, to_step INTEGER NOT NULL, staff_id TEXT NOT NULL,
     at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, note TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS forms (
+    type_id INTEGER NOT NULL REFERENCES types(id), doc_name TEXT NOT NULL, title TEXT NOT NULL, fields TEXT NOT NULL,
+    status TEXT NOT NULL, file_path TEXT NOT NULL DEFAULT '', PRIMARY KEY (type_id, doc_name));
 CREATE TABLE IF NOT EXISTS uploads (
     id INTEGER PRIMARY KEY, submission_id INTEGER NOT NULL REFERENCES submissions(id), step_index INTEGER NOT NULL,
     doc_name TEXT NOT NULL, filename TEXT NOT NULL, path TEXT NOT NULL, findings TEXT NOT NULL, status TEXT NOT NULL,
@@ -35,6 +38,16 @@ def validate_steps(steps) -> list:
                 or not isinstance(s.get("documents"), list) or not all(isinstance(d, str) and d.strip() for d in s["documents"])):
             raise ValueError("each step needs a title and a documents list")
     return steps
+
+
+def validate_form(title: str, fields: list, allow_empty: bool = False) -> None:
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("form needs a title")
+    if not isinstance(fields, list) or (not fields and not allow_empty) or len(fields) > 60:
+        raise ValueError("form needs 1 to 60 fields")
+    for f in fields:
+        if not isinstance(f, dict) or not isinstance(f.get("label"), str) or not f["label"].strip() or not isinstance(f.get("hint", ""), str):
+            raise ValueError("every field needs a label")
 
 
 class Tracker:
@@ -102,6 +115,31 @@ class Tracker:
                               "(SELECT MAX(version) FROM versions WHERE type_id = v.type_id AND status = 'approved') ORDER BY t.name").fetchall()
         return [self._version(r) for r in rows]
 
+    # ---- blank forms: fields staff can edit; researchers see only approved ones ----
+    @staticmethod
+    def _form(row) -> dict:
+        return {**dict(row), "fields": json.loads(row["fields"])}
+
+    def put_form(self, type_id: int, doc_name: str, title: str, fields: list, status: str = "draft", file_path: str = "") -> None:
+        """Insert or replace the form of one document of a type."""
+        validate_form(title, fields, allow_empty=bool(file_path))
+        with self._db() as db:
+            db.execute("INSERT OR REPLACE INTO forms (type_id, doc_name, title, fields, status, file_path) VALUES (?, ?, ?, ?, ?, ?)",
+                       (type_id, doc_name, title.strip(), json.dumps(fields, ensure_ascii=False), status, file_path))
+
+    def get_form(self, type_id: int, doc_name: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM forms WHERE type_id = ? AND doc_name = ?", (type_id, doc_name)).fetchone()
+        return self._form(row) if row else None
+
+    def list_forms(self, type_id: int) -> list[dict]:
+        with self._db() as db:
+            return [self._form(r) for r in db.execute("SELECT * FROM forms WHERE type_id = ? ORDER BY doc_name", (type_id,))]
+
+    def approve_form(self, type_id: int, doc_name: str) -> bool:
+        with self._db() as db:
+            return db.execute("UPDATE forms SET status = 'approved' WHERE type_id = ? AND doc_name = ?", (type_id, doc_name)).rowcount > 0
+
     # ---- submissions ----
     def create_submission(self, title: str, version_id: int, researcher_ids: list[str], staff_id: str) -> int:
         v = self.get_version(version_id)
@@ -118,10 +156,10 @@ class Tracker:
     def _submission(self, db, row) -> dict:
         v = json.loads(row["steps"])
         rs = [r[0] for r in db.execute("SELECT user_id FROM submission_researchers WHERE submission_id = ? ORDER BY user_id", (row["id"],))]
-        return {"id": row["id"], "title": row["title"], "type_name": row["type_name"], "staff_id": row["staff_id"],
+        return {"id": row["id"], "title": row["title"], "type_id": row["type_id"], "type_name": row["type_name"], "staff_id": row["staff_id"],
                 "researcher_ids": rs, "current_step": row["current_step"], "step_count": len(v), "steps": v}
 
-    _SUB_SQL = ("SELECT s.*, v.steps, t.name AS type_name FROM submissions s JOIN versions v ON v.id = s.version_id "
+    _SUB_SQL = ("SELECT s.*, v.steps, v.type_id, t.name AS type_name FROM submissions s JOIN versions v ON v.id = s.version_id "
                 "JOIN types t ON t.id = v.type_id")
 
     def list_submissions(self, user_id: str, role: str) -> list[dict]:

@@ -25,7 +25,7 @@ def draft_form(doc_name: str, step: dict, type_name: str, llm=chat) -> dict:
     return {"title": title.strip(), "fields": [{"label": f["label"].strip(), "hint": f.get("hint") if isinstance(f.get("hint"), str) else ""} for f in fields]}
 
 
-def build_docx(form: dict, path: Path) -> None:
+def build_docx(form: dict, path) -> None:  # path: a file path or any binary file object
     doc = Document()
     doc.add_heading(form["title"], level=1)
     doc.add_paragraph(NOTICE)
@@ -36,5 +36,6 @@ def build_docx(form: dict, path: Path) -> None:
         row[0].text = f["label"] + (f"\n({f['hint']})" if f["hint"] else "")
     doc.add_paragraph()
     doc.add_paragraph("ลงชื่อ ______________________________    วันที่ ____________________")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(path, Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(path)
