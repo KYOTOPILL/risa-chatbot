@@ -93,13 +93,13 @@ def submission(sid: int, user: User = Depends(current_user)):
 
 
 @router.post("/submissions")
-def create_submission(body: SubmissionIn, _: User = Depends(require_staff)):
+def create_submission(body: SubmissionIn, user: User = Depends(require_staff)):
     people = [*body.researcher_ids, body.staff_id]
     if any(p not in MOCK_USERS for p in people) or MOCK_USERS[body.staff_id]["role"] != "staff" \
             or any(MOCK_USERS[r]["role"] != "researcher" for r in body.researcher_ids):
         raise HTTPException(400, "unknown user or wrong role")
     try:
-        return {"id": state.get_tracker().create_submission(body.title, body.version_id, body.researcher_ids, body.staff_id)}
+        return {"id": state.get_tracker().create_submission(body.title, body.version_id, body.researcher_ids, body.staff_id, user.id)}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -115,17 +115,28 @@ def move(sid: int, body: MoveIn, user: User = Depends(require_staff)):
     return {"ok": True}
 
 
+@router.get("/notifications")
+def notifications(user: User = Depends(current_user)):
+    return state.get_tracker().notifications(user.id)
+
+
+@router.post("/notifications/seen")
+def notifications_seen(user: User = Depends(current_user)):
+    state.get_tracker().mark_seen(user.id)
+    return {"ok": True}
+
+
 class StaffIn(BaseModel):
     staff_id: str
 
 
 @router.post("/submissions/{sid}/staff")
-def reassign(sid: int, body: StaffIn, _: User = Depends(require_staff)):
+def reassign(sid: int, body: StaffIn, user: User = Depends(require_staff)):
     """Any staff member may hand a request over, so one person being away never strands it."""
     if body.staff_id not in MOCK_USERS or MOCK_USERS[body.staff_id]["role"] != "staff":
         raise HTTPException(400, "the person in charge must be a staff member")
     try:
-        state.get_tracker().set_staff(sid, body.staff_id)
+        state.get_tracker().set_staff(sid, body.staff_id, user.id)
     except ValueError:
         raise HTTPException(404, "not found")
     return {"ok": True}
@@ -277,7 +288,7 @@ def start_request(type_id: int, user: User = Depends(current_user)):
     mine = next((s for s in tk.list_submissions(user.id, "researcher") if s["type_id"] == type_id), None)
     if mine:  # one request per post: go back to it and edit instead of starting a copy
         return {"id": mine["id"]}
-    return {"id": tk.create_submission(f"{v['type_name']} - {user.name}", v["id"], [user.id], v["owner_id"])}
+    return {"id": tk.create_submission(f"{v['type_name']} - {user.name}", v["id"], [user.id], v["owner_id"], user.id)}
 
 
 @router.post("/types/{type_id}/versions")
@@ -545,7 +556,7 @@ def send_upload(uid: int, user: User = Depends(current_user)):
         raise HTTPException(404, "not found")
     _own_submission(up["submission_id"], user)
     try:
-        tk.send_upload(uid)
+        tk.send_upload(uid, user.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"status": "sent"}

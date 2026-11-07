@@ -308,3 +308,45 @@ def test_any_staff_may_reassign_a_request_researchers_may_not(env):
     assert client("r1").post(f"/api/track/submissions/{sid}/staff", json={"staff_id": "s1"}).status_code == 403
     assert client("s1").post(f"/api/track/submissions/{sid}/staff", json={"staff_id": "r1"}).status_code == 400
     assert client("s1").post("/api/track/submissions/999/staff", json={"staff_id": "s1"}).status_code == 404
+
+
+def _notes(uid):
+    return [n["text"] for n in client(uid).get("/api/track/notifications").json()["items"]]
+
+
+def test_notifications_follow_send_review_and_reassign(env):
+    _, sid, tid, _ = env
+    publish_form(tid)
+    r1, s1 = client("r1"), client("s1")
+    assert any("งานใหม่" in t for t in _notes("s1")) and any("งานใหม่" in t for t in _notes("r1"))  # created by the test directly: nobody is the actor
+    uid = fill(r1, sid).json()["upload_id"]
+    r1.post(f"/api/track/uploads/{uid}/send")
+    assert any("รอตรวจสอบ" in t for t in _notes("s1")) and not any("รอตรวจสอบ" in t for t in _notes("r1"))  # staff hear of it, the sender does not
+    s1.post(f"/api/track/uploads/{uid}/review", json={"decision": "return", "dismissed": [], "note": "fix budget"})
+    assert any("ส่งกลับ" in t and "fix budget" in t for t in _notes("r1"))
+    assert not any("ส่งกลับ" in t for t in _notes("s1"))
+    client("s1").post(f"/api/track/submissions/{sid}/staff", json={"staff_id": "s2"})
+    assert any("ได้รับมอบหมาย" in t for t in _notes("s2")) and not any("ได้รับมอบหมาย" in t for t in _notes("s1"))
+
+
+def test_notifications_unread_count_and_mark_seen_are_per_person(env):
+    _, sid, _, _ = env
+    r1, s1 = client("r1"), client("s1")
+    assert r1.get("/api/track/notifications").json()["unread"] >= 1
+    r1.post("/api/track/notifications/seen")
+    assert r1.get("/api/track/notifications").json()["unread"] == 0
+    assert s1.get("/api/track/notifications").json()["unread"] >= 1  # not touched by Somchai
+    assert client("r2").get("/api/track/notifications").json() == {"items": [], "unread": 0}
+    assert TestClient(server.app).get("/api/track/notifications").status_code == 401
+
+
+def test_return_note_stays_after_saving_a_draft(env):
+    _, sid, tid, _ = env
+    publish_form(tid)
+    r1 = client("r1")
+    uid = fill(r1, sid).json()["upload_id"]
+    r1.post(f"/api/track/uploads/{uid}/send")
+    client("s1").post(f"/api/track/uploads/{uid}/review", json={"decision": "return", "dismissed": [], "note": "fix budget"})
+    r1.post(f"/api/track/submissions/{sid}/forms", data={"doc_name": "Travel claim", "answers": "{}", "draft": "true"})
+    up = r1.get(f"/api/track/submissions/{sid}").json()["uploads"][0]
+    assert up["status"] == "draft" and up["note"] == "fix budget"

@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS uploads (
     doc_name TEXT NOT NULL, filename TEXT NOT NULL, path TEXT NOT NULL, findings TEXT NOT NULL, status TEXT NOT NULL,
     dismissed TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', reviewed_by TEXT, answers TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, submission_id INTEGER NOT NULL, text TEXT NOT NULL,
+    seen INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
 UPLOAD_STATUSES = {"draft", "screened", "cannot_check", "sent", "approved", "returned"}
 
@@ -209,7 +212,7 @@ class Tracker:
         return [v for v in self.list_types() if v["open"]]
 
     # ---- submissions ----
-    def create_submission(self, title: str, version_id: int, researcher_ids: list[str], staff_id: str) -> int:
+    def create_submission(self, title: str, version_id: int, researcher_ids: list[str], staff_id: str, actor: str | None = None) -> int:
         v = self.get_version(version_id)
         if not v or v["status"] != "approved":
             raise ValueError("submission needs an approved type version")
@@ -219,6 +222,7 @@ class Tracker:
             sid = db.execute("INSERT INTO submissions (title, version_id, staff_id) VALUES (?, ?, ?)",
                              (title, version_id, staff_id)).lastrowid
             db.executemany("INSERT OR IGNORE INTO submission_researchers VALUES (?, ?)", [(sid, r) for r in researcher_ids])
+        self._notify(sid, f"งานใหม่ “{title}”", [staff_id, *researcher_ids], actor)
         return sid
 
     def _submission(self, db, row) -> dict:
@@ -256,11 +260,36 @@ class Tracker:
                           for u in (self.latest_uploads(sid, cur).values() if cur < sub["step_count"] else [])]
         return sub
 
-    def set_staff(self, sid: int, staff_id: str) -> None:
+    # ---- notifications: what changed on a request, for each person involved except the one who did it ----
+    def _notify(self, sid: int, text: str, to: list[str], actor: str | None) -> None:
+        with self._db() as db:
+            db.executemany("INSERT INTO notifications (user_id, submission_id, text) VALUES (?, ?, ?)", [(u, sid, text) for u in dict.fromkeys(to) if u != actor])
+
+    def _researchers(self, sid: int) -> list[str]:
+        with self._db() as db:
+            return [r[0] for r in db.execute("SELECT user_id FROM submission_researchers WHERE submission_id = ?", (sid,))]
+
+    def _title_staff(self, sid: int) -> tuple[str, str]:
+        with self._db() as db:
+            r = db.execute("SELECT title, staff_id FROM submissions WHERE id = ?", (sid,)).fetchone()
+        return r["title"], r["staff_id"]
+
+    def notifications(self, user_id: str, limit: int = 30) -> dict:
+        with self._db() as db:
+            rows = [dict(r) for r in db.execute("SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))]
+            unread = db.execute("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND seen = 0", (user_id,)).fetchone()[0]
+        return {"items": rows, "unread": unread}
+
+    def mark_seen(self, user_id: str) -> None:
+        with self._db() as db:
+            db.execute("UPDATE notifications SET seen = 1 WHERE user_id = ?", (user_id,))
+
+    def set_staff(self, sid: int, staff_id: str, actor: str | None = None) -> None:
         """Hand a request to another staff member. Who may do it is the caller's rule."""
         with self._db() as db:
             if not db.execute("UPDATE submissions SET staff_id = ? WHERE id = ?", (staff_id, sid)).rowcount:
                 raise ValueError("no such submission")
+        self._notify(sid, f"คุณได้รับมอบหมายให้ดูแลงาน “{self._title_staff(sid)[0]}”", [staff_id], actor)
 
     def move_step(self, sid: int, staff_id: str, to_step: int, note: str = "") -> None:
         """Only the staff in charge may move; to_step == step_count means completed."""
@@ -275,14 +304,17 @@ class Tracker:
             db.execute("UPDATE submissions SET current_step = ? WHERE id = ?", (to_step, sid))
             db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
                        (sid, row["current_step"], to_step, staff_id, note))
+        self._notify(sid, f"งาน “{row['title']}” ย้ายไปขั้นตอนที่ {to_step + 1}" if to_step < len(json.loads(row["steps"])) else f"งาน “{row['title']}” ดำเนินการเสร็จสิ้น", self._researchers(sid), staff_id)
 
     # ---- uploads ----
     def add_upload(self, sid: int, step_index: int, doc_name: str, filename: str, path: str, findings: list | None, status: str, answers: list | None = None) -> int:
         if status not in UPLOAD_STATUSES:
             raise ValueError("bad upload status")
         with self._db() as db:
-            return db.execute("INSERT INTO uploads (submission_id, step_index, doc_name, filename, path, findings, status, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                              (sid, step_index, doc_name, filename, path, json.dumps(findings or [], ensure_ascii=False), status, json.dumps(answers or [], ensure_ascii=False))).lastrowid
+            last = db.execute("SELECT note FROM uploads WHERE submission_id = ? AND step_index = ? AND doc_name = ? ORDER BY id DESC LIMIT 1", (sid, step_index, doc_name)).fetchone()
+            note = last["note"] if last else ""  # the staff's reason for a return stays visible while the researcher keeps editing
+            return db.execute("INSERT INTO uploads (submission_id, step_index, doc_name, filename, path, findings, status, answers, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              (sid, step_index, doc_name, filename, path, json.dumps(findings or [], ensure_ascii=False), status, json.dumps(answers or [], ensure_ascii=False), note)).lastrowid
 
     @staticmethod
     def _upload(row) -> dict:
@@ -293,12 +325,15 @@ class Tracker:
             row = db.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,)).fetchone()
         return self._upload(row) if row else None
 
-    def send_upload(self, upload_id: int) -> None:
+    def send_upload(self, upload_id: int, actor: str | None = None) -> None:
         """Researcher sends a screened upload to staff. Conditional, so it never overwrites a staff decision."""
         with self._db() as db:
             n = db.execute("UPDATE uploads SET status = 'sent' WHERE id = ? AND status IN ('screened', 'cannot_check')", (upload_id,)).rowcount
         if not n:
             raise ValueError("upload cannot be sent")
+        up = self.get_upload(upload_id)
+        title, staff = self._title_staff(up["submission_id"])
+        self._notify(up["submission_id"], f"{up['doc_name']} ส่งแล้ว รอตรวจสอบ ({title})", [staff], actor)
 
     def latest_uploads(self, sid: int, step_index: int) -> dict[str, dict]:
         """Newest upload per document name for one step; older ones stay as history."""
@@ -329,6 +364,9 @@ class Tracker:
                            ("approved" if decision == "approve" else "returned", json.dumps(dismissed), note, staff_id, upload_id)).rowcount
         if not n:
             raise ValueError("upload is not waiting for review")
+        title = self._title_staff(up["submission_id"])[0]
+        self._notify(up["submission_id"], (f"{up['doc_name']} อนุมัติแล้ว ({title})" if decision == "approve" else f"{up['doc_name']} ถูกส่งกลับให้แก้ไข ({title})" + (f": {note}" if note else "")),
+                     self._researchers(up["submission_id"]), staff_id)
         if decision != "approve":
             return False
         steps = json.loads(row["steps"])
@@ -341,12 +379,7 @@ class Tracker:
                 if moved:
                     db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
                                (up["submission_id"], cur, cur + 1, staff_id, "auto: all documents approved"))
+            if moved:
+                self._notify(up["submission_id"], f"งาน “{title}” ไปขั้นตอนถัดไปแล้ว" if cur + 1 < len(steps) else f"งาน “{title}” ดำเนินการเสร็จสิ้น", self._researchers(up["submission_id"]), staff_id)
             return bool(moved)
-        return False
-        steps = json.loads(row["steps"])
-        docs = steps[up["step_index"]]["documents"] if up["step_index"] < len(steps) else []
-        latest = self.latest_uploads(up["submission_id"], up["step_index"])
-        if up["step_index"] == row["current_step"] and docs and all(latest.get(d, {}).get("status") == "approved" for d in docs):
-            self.move_step(up["submission_id"], staff_id, row["current_step"] + 1, "auto: all documents approved")
-            return True
         return False
