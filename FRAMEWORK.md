@@ -117,7 +117,7 @@ Goals 2 and 3 of the meeting: step tracking and document check. Open `/`. Spec: 
   ```
                     ┌──────────────── / (home.html) ────────────────┐
                     │  login → researcher home  OR  staff workspace │
-                    │            (staff menu: 📁 file manager tab)  │
+                    │            (staff menu: files tab)  │
                     └───────┬───────────────────────────────────────┘
           header "แชท" link │
           (all logged in)   ▼
@@ -125,11 +125,11 @@ Goals 2 and 3 of the meeting: step tracking and document check. Open `/`. Spec: 
                             │ "หน้าหลัก"
                             └──────► /
 
-     Researcher home also embeds /chat in the 💬 drawer (iframe);
+     Researcher home also embeds /chat in the chat drawer (iframe);
      there "หน้าหลัก" uses target="_top" so it leaves the iframe.
   ```
 
-  Each page calls: home `/api/track/*` and `/api/admin/*` (staff, 📁 tab); chat `/api/chat/stream` and `/download/{doc_id}`.
+  Each page calls: home `/api/track/*` and `/api/admin/*` (staff, files tab); chat `/api/chat/stream` and `/download/{doc_id}`.
 - Look: minimalist (warm off-white, charcoal text, `--ink` #111 buttons with 6px corners, 1px #eaeaea borders, 8-12px corners, pastel `--warn`/`--err`/`--ok`/`--info` badges, no emoji, no heavy shadows). All colours are tokens in the `:root` block of `style.css`, with a dark set; `icons.js` has `icon(name)` for the menu and chat button (one stroke width).
 - `web/home.html`, `home.js`, `home.css`, `todo.js`: Thai UI, text always set with `textContent`. Login screen: username and password form (same form for both roles; the account decides the screen), wrong login shows an inline message. Phones: both pages carry the viewport and theme-color meta; `style.css` and `home.css` end with a "phones" block (44 px tap targets on touch screens, header and rows wrap, cards wrap long text, 2x2 staff menu and a full-screen chat drawer under 480 px, the chat page hides its home link when embedded in the drawer via the `embedded` class). Not an installable app (no manifest or service worker). Researcher home: a "สิ่งที่ต้องทำ" list (`todoItems` in `todo.js`, pure and tested with node: returned documents first, then documents waiting for staff), then one stepper card per submission with upload and send inline, and a ถาม AI button (chat icon) that opens a drawer holding `/chat` in an iframe (loaded on first open; researchers only). Staff workspace: left menu with SVG icons: รอตรวจ (count, opens first), ทุกงาน, ประเภททุน, ไฟล์ความรู้ (the file manager, mounted once by `mountFiles()` from `files.js` on the `#files-root` markup that ships inside `home.html`; it stays in the page, hidden, when another tab shows). Review rows show the AI finding count; an upload that could not be checked also shows no findings, so the label says "(หรือตรวจไม่ได้)" because status `sent` no longer records `cannot_check`.
 - Known limits: the login is a demo (plain-text passwords in `config.py`, no HTTPS or Secure cookie, no rate limit, no lockout); staff cannot reassign a submission; no notifications; template match is a file-name substring; step changes by two staff at once are not locked.
