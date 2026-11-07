@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 import server
 import state
+from creds import CREDS
 from tracker import Tracker
 
 STEPS3 = [{"title": t, "documents": [], "page": None, "unsure": False} for t in ("Submit", "Review", "Sign")]
@@ -20,13 +21,35 @@ def env(tmp_path, monkeypatch):
 
 def login(user_id):
     c = TestClient(server.app)
-    r = c.post("/api/track/login", json={"user_id": user_id})
+    r = c.post("/api/track/login", json=CREDS[user_id])
     assert r.status_code == 200
     return c
 
 
-def test_login_unknown_user_401():
-    assert TestClient(server.app).post("/api/track/login", json={"user_id": "nobody"}).status_code == 401
+def test_login_with_wrong_or_unknown_credentials_401():
+    c = TestClient(server.app)
+    assert c.post("/api/track/login", json={"username": "nobody", "password": "x"}).status_code == 401
+    assert c.post("/api/track/login", json={**CREDS["s1"], "password": "wrong"}).status_code == 401
+    assert c.get("/api/track/me").status_code == 401
+
+
+def test_forged_or_tampered_cookie_is_rejected():
+    c = TestClient(server.app)
+    for bad in ("s1", "s1.deadbeef", "x.y"):
+        c.cookies.clear()
+        c.cookies.set("uid", bad)
+        assert c.get("/api/track/me").status_code == 401, bad
+    login("r1")  # a real session cookie for r1 must not work when re-labelled as s1
+    real = login("r1").cookies.get("uid")
+    c.cookies.clear()
+    c.cookies.set("uid", "s1" + real[real.index("."):])
+    assert c.get("/api/track/me").status_code == 401
+
+
+def test_user_list_needs_login_and_never_shows_passwords(env):
+    assert TestClient(server.app).get("/api/track/mock-users").status_code == 401
+    got = login("r1").get("/api/track/mock-users").json()
+    assert "password" not in str(got) and {"id": "s1", "name": "Malee", "role": "staff"} in got
 
 
 def test_login_sets_cookie_and_me_returns_role(env):
@@ -79,11 +102,6 @@ def test_move_works_and_out_of_range_400(env):
     assert s1.post(f"/api/track/submissions/{sid}/move", json={"to_step": 1, "note": "ok"}).status_code == 200
     assert s1.get(f"/api/track/submissions/{sid}").json()["current_step"] == 1
     assert s1.post(f"/api/track/submissions/{sid}/move", json={"to_step": 9}).status_code == 400
-
-
-def test_mock_users_lists_everyone_with_roles():
-    got = TestClient(server.app).get("/api/track/mock-users").json()
-    assert {"id": "s1", "name": "Malee", "role": "staff"} in got
 
 
 # ---- Task 4: AI-drafted type steps ----

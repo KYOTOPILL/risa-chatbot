@@ -33,14 +33,20 @@ function fail(e) { alert(e.message); }
 const act = (fn) => async (ev) => { try { await fn(ev); } catch (e) { fail(e); } };
 
 // ---------- login ----------
-async function loginScreen() {
-  users = await api("/mock-users");
-  const card = (role, title, hint) => h("section", { class: "card login-card" }, h("h2", {}, title), h("p", { class: "muted" }, hint),
-    users.filter((u) => u.role === role).map((u) => h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/login", send("POST", { user_id: u.id })); start(); }) }, u.name)));
-  show(h("div", { class: "login" }, h("h2", {}, "เข้าสู่ระบบ (ระบบจำลอง)"), h("p", { class: "muted" }, "ตอนนี้เป็นบัญชีทดลอง ภายหลังจะเปลี่ยนเป็นบัญชีอีเมล CMU"),
-    h("div", { class: "login-grid" },
-      card("researcher", "🎓 นักวิจัย", "ดูความคืบหน้า ส่งเอกสาร ถาม AI"),
-      card("staff", "🧑‍💼 เจ้าหน้าที่", "ตรวจเอกสาร ย้ายขั้นตอน จัดการประเภททุน"))));
+function loginScreen() {
+  const user = h("input", { type: "text", name: "username", autocomplete: "username", autocapitalize: "none", spellcheck: false, required: true });
+  const pass = h("input", { type: "password", name: "password", autocomplete: "current-password", required: true });
+  const err = h("p", { class: "login-err", role: "alert", hidden: true });
+  const submit = h("button", { class: "login-cta", type: "submit" }, "เข้าสู่ระบบ");
+  const form = h("form", { class: "card login-card", onsubmit: async (ev) => {
+    ev.preventDefault();
+    err.hidden = true; submit.disabled = true;
+    try { await api("/login", send("POST", { username: user.value.trim(), password: pass.value })); start(); }
+    catch (e) { err.textContent = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"; err.hidden = false; pass.value = ""; pass.focus(); submit.disabled = false; }
+  } },
+    h("label", {}, "ชื่อผู้ใช้", user), h("label", {}, "รหัสผ่าน", pass), err, submit);
+  show(h("div", { class: "login" }, h("h1", {}, "เข้าสู่ระบบ"), h("p", { class: "muted" }, "ระบบจำลอง ภายหลังจะเปลี่ยนเป็นบัญชีอีเมล CMU"), form));
+  user.focus();
 }
 
 // ---------- shared: stepper ----------

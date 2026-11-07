@@ -132,11 +132,19 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 .chat-drawer[hidden], .chat-fab[hidden] { display: none; }
 .chat-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .chat-frame { flex: 1; width: 100%; border: 0; }
-.login { margin-top: 18px; }
-.login-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.login-card { display: flex; flex-direction: column; gap: 10px; }
-.login-card .primary { width: 100%; }
-@media (max-width: 700px) { .login-grid { grid-template-columns: 1fr; } }
+.login { max-width: 400px; margin: 48px auto 0; }
+.login h1 { font-size: 1.9rem; font-weight: 600; letter-spacing: -.01em; margin: 0 0 6px; }
+.login .muted { margin: 0 0 24px; }
+.login-card { display: flex; flex-direction: column; gap: 16px; padding: 28px; border-radius: 12px; box-shadow: none; }
+.login-card label { display: flex; flex-direction: column; gap: 6px; font-size: .9rem; color: var(--muted); }
+.login-card input { font: inherit; font-size: 1rem; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; }
+.login-card input:focus { outline: 2px solid var(--text); outline-offset: -1px; border-color: transparent; }
+.login-cta { font: inherit; background: var(--text); color: var(--bg); border: 0; border-radius: 6px; padding: 12px; cursor: pointer; }
+.login-cta:hover { opacity: .85; }
+.login-cta:active { transform: scale(.98); }
+.login-cta:disabled { opacity: .5; cursor: default; }
+.login-err { margin: 0; color: var(--err); font-size: .9rem; }
+.login-err[hidden] { display: none; }
 /* room under the last card for the floating chat button */
 .adm { padding-bottom: 88px; }
 

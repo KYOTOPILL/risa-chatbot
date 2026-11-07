@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import state
-from auth import User, current_user, require_staff
+from auth import User, authenticate, current_user, require_staff, session_value
 from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
 from extract import extract_pages, extract_text
 from rag import chat as llm
@@ -18,7 +18,8 @@ router = APIRouter(prefix="/api/track")
 
 
 class LoginIn(BaseModel):
-    user_id: str
+    username: str
+    password: str
 
 
 class SubmissionIn(BaseModel):
@@ -44,16 +45,17 @@ class MoveIn(BaseModel):
 
 
 @router.get("/mock-users")
-def mock_users():
-    return [{"id": i, **u} for i, u in MOCK_USERS.items()]
+def mock_users(_user: User = Depends(current_user)):
+    return [{"id": i, "name": u["name"], "role": u["role"]} for i, u in MOCK_USERS.items()]
 
 
 @router.post("/login")
 def login(body: LoginIn, response: Response):
-    if body.user_id not in MOCK_USERS:
-        raise HTTPException(401, "unknown user")
-    response.set_cookie("uid", body.user_id, httponly=True, samesite="lax")
-    return {"id": body.user_id, **MOCK_USERS[body.user_id]}
+    uid = authenticate(body.username, body.password)
+    if uid is None:
+        raise HTTPException(401, "wrong username or password")
+    response.set_cookie("uid", session_value(uid), httponly=True, samesite="lax")
+    return {"id": uid, "name": MOCK_USERS[uid]["name"], "role": MOCK_USERS[uid]["role"]}
 
 
 @router.post("/logout")

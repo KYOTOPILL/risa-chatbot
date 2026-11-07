@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 import admin
 import server
 import state
+from creds import CREDS
 from store import Store
 from test_store_ingest import fake_embed
 
@@ -36,9 +37,9 @@ def test_file_api_needs_a_staff_login(monkeypatch):
     c = TestClient(server.app)
     routes = lambda: (c.get("/api/admin/files"), c.post("/api/admin/reindex"))
     assert [r.status_code for r in routes()] == [401, 401]  # not logged in
-    c.post("/api/track/login", json={"user_id": "r1"})
+    c.post("/api/track/login", json=CREDS["r1"])
     assert [r.status_code for r in routes()] == [403, 403]  # a researcher is not staff
-    c.post("/api/track/login", json={"user_id": "s1"})
+    c.post("/api/track/login", json=CREDS["s1"])
     assert c.get("/api/admin/files").status_code == 200
 
 
@@ -257,7 +258,7 @@ def test_delete_folder_removes_contents_only_that_folder(env):
 def test_cross_site_post_is_blocked_for_staff():
     server.app.dependency_overrides.clear()
     c = TestClient(server.app)
-    c.post("/api/track/login", json={"user_id": "s1"})
+    c.post("/api/track/login", json=CREDS["s1"])
     r = c.post("/api/admin/reindex", headers={"Origin": "https://evil.example"})
     assert r.status_code == 403 and "cross-site" in r.text
     r = c.get("/api/admin/folders", headers={"Origin": "https://evil.example"})

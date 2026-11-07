@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -28,12 +29,14 @@ HR_CONTACT = "ฝ่ายทรัพยากรบุคคล (HR) อีเ
 SUPPORTED_EXTS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
 
 # Tracking dashboard. ponytail: mock users until CMU email login exists; only auth.current_user should change then
+# ponytail: plaintext demo passwords; real CMU login replaces this whole table
 MOCK_USERS = {
-    "r1": {"name": "Somchai", "role": "researcher"},
-    "r2": {"name": "Nida", "role": "researcher"},
-    "s1": {"name": "Malee", "role": "staff"},
-    "s2": {"name": "Anan", "role": "staff"},
+    "r1": {"name": "Somchai", "role": "researcher", "username": "somchai", "password": "somchai123"},
+    "r2": {"name": "Nida", "role": "researcher", "username": "nida", "password": "nida123"},
+    "s1": {"name": "Malee", "role": "staff", "username": "malee", "password": "malee123"},
+    "s2": {"name": "Anan", "role": "staff", "username": "anan", "password": "anan123"},
 }
+SESSION_SECRET = os.environ.get("RISA_SESSION_SECRET") or secrets.token_hex(32)  # unset: logins end when the server restarts
 TRACKER_DB = ROOT / "tracker.db"
 UPLOAD_DIR = ROOT / "uploads"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
