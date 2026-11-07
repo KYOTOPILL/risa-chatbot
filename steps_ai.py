@@ -43,11 +43,18 @@ def draft_steps(pages: list[str], llm=chat) -> list[dict]:
 
 
 SCREEN_PROMPT = (
-    "You check a document an applicant uploaded for a scholarship or funding step. Find real problems: "
-    '"missing" (required information absent), "incorrect" (contradicts itself or looks wrong), "unclear" (ambiguous). '
+    "You do a quick quality check of a document an applicant submitted for a scholarship or funding step. It is a check of completeness and basic logic, "
+    "not a decision: staff decide whether the content makes sense. Report ONLY these: "
+    '"missing" (a required field or part is empty, or something the step requires is absent); '
+    '"incorrect" (a plain error anyone can see: placeholder or meaningless text such as "test" or "123" where a name or description is expected, a wrong format, '
+    "an end date before its start date, numbers that contradict each other inside the document such as a total that is not the sum of its parts); "
+    '"unclear" (text that cannot be read or understood). '
+    "Do NOT judge whether amounts, dates, reasons, plans or choices are sensible, sufficient, allowed or fit the funder's rules. "
+    "Do NOT ask for more justification or detail, and do NOT compare figures against each other unless they must be equal or must add up. "
+    "If you are not sure it is a plain error, do not report it. "
     'Answer with a JSON array only: [{"kind": "missing"|"incorrect"|"unclear", "field": the name of the one field or section concerned (short, optional), '
     '"text": ONE sentence, at most 120 characters, saying what is wrong, "fix": what the applicant should do, at most 80 characters (optional)}]. '
-    "One finding per problem: do not list several fields in one finding, and merge findings that say the same thing. At most 8 findings, most important first. "
+    "One finding per problem, merge findings that say the same thing, at most 8, most important first. "
     "Do not repeat the field name inside the text. Answer [] if there are no problems. Write in the document's own language."
 )
 KINDS = {"missing", "incorrect", "unclear"}
