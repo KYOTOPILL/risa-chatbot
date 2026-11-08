@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import admin
-import server
+from app.api import admin
+from app.api import server
 from app.core import state
 from creds import CREDS
 from app.rag.store import Store

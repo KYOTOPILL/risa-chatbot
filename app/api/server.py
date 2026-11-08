@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 from typing_extensions import Annotated
 
-import admin
+from app.api import admin
 from app.features import my_requests
 from app.features import tracker_api
 from app.features import downloads

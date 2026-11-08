@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.features import forms_ai
-import server
+from app.api import server
 from app.core import state
 from app.features import tracker_api
 from creds import CREDS
