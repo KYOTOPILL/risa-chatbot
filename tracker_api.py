@@ -13,8 +13,8 @@ from pydantic import BaseModel
 import state
 from app.core.auth import User, authenticate, current_user, login_allowed, login_failed, require_staff, session_value
 from app.core.config import COOKIE_SECURE, MAX_UPLOAD_BYTES, MOCK_USERS, SESSION_TTL, UPLOAD_DIR
-from extract import extract_pages, extract_text
-from rag import chat as llm
+from app.rag.extract import extract_pages, extract_text
+from app.rag.rag import chat as llm
 from forms_ai import draft_form
 from steps_ai import draft_steps, screen_document
 

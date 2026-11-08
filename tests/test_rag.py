@@ -1,9 +1,9 @@
 import json
 
-import rag
+from app.rag import rag
 from app.core.config import HR_CONTACT
-from rag import Turn, answer, is_mostly_thai
-from store import Hit, NameHit
+from app.rag.rag import Turn, answer, is_mostly_thai
+from app.rag.store import Hit, NameHit
 
 THAI_OK = "พนักงานลาพักร้อนได้ 10 วันต่อปี ตามนโยบาย HR"
 

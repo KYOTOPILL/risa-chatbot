@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.core.config import HR_CONTACT
-import rag
-from rag import Reply, Turn, answer, is_mostly_thai
+from app.rag import rag
+from app.rag.rag import Reply, Turn, answer, is_mostly_thai
 
 
 @dataclass
@@ -49,7 +49,7 @@ def run(cases: list[dict], answer_fn, file_names=lambda ids: ids) -> list[Result
 
 
 if __name__ == "__main__":
-    from store import Store
+    from app.rag.store import Store
 
     store = Store()
     cases = json.loads((Path(__file__).parent / "questions.json").read_text(encoding="utf-8"))

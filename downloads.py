@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from docmeta import SHAREABLE
+from app.rag.docmeta import SHAREABLE
 
 
 def resolve_download(doc_id: str, store, content_dir: Path) -> Path | None:

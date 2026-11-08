@@ -3,7 +3,7 @@ import json
 import pymupdf
 import pytest
 
-from extract import extract_pages
+from app.rag.extract import extract_pages
 from steps_ai import draft_steps
 
 GOOD = json.dumps([

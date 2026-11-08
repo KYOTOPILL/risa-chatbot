@@ -1,6 +1,6 @@
 from app.core.config import HR_CONTACT
 from evals.run_eval import check, run
-from rag import Reply
+from app.rag.rag import Reply
 
 THAI = "ลาพักร้อน 10 วัน"
 

@@ -3,8 +3,8 @@ import argparse
 import threading
 import time
 
-from rag import answer
-from store import Store
+from app.rag.rag import answer
+from app.rag.store import Store
 
 QUESTION = "ลาพักร้อนได้กี่วันต่อปี"
 

@@ -5,7 +5,7 @@ from functools import lru_cache
 
 from app.core import config
 from app.core.config import TRACKER_DB
-from store import Store
+from app.rag.store import Store
 from tracker import Tracker
 
 # one re-index at a time; chat never waits for it (each question runs in its own thread, the model servers queue themselves)

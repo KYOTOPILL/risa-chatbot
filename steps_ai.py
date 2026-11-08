@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from app.core.config import CONTENT_DIR
-from rag import chat
+from app.rag.rag import chat
 
 DRAFT_PROMPT = (
     "You read a document that describes how to apply for a scholarship or research funding. "

@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from downloads import resolve_download
-from ingest import build_index
-from store import Store
+from app.rag.ingest import build_index
+from app.rag.store import Store
 from test_store_ingest import fake_embed
 
 

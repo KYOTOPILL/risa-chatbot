@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 import state
 from app.core.config import CONTENT_DIR, SUPPORTED_EXTS
-from docmeta import SHAREABLE, doc_meta
-from ingest import build_index, summarize
-from store import display_summary
+from app.rag.docmeta import SHAREABLE, doc_meta
+from app.rag.ingest import build_index, summarize
+from app.rag.store import display_summary
 from app.core.auth import require_staff
 
 MAX_BYTES = 25 * 1024 * 1024

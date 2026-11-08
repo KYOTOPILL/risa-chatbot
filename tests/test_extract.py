@@ -3,7 +3,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from extract import extract_text
+from app.rag.extract import extract_text
 
 
 
@@ -37,7 +37,7 @@ def test_image_only_pdf_returns_empty(tmp_path):
 
 
 def test_thai_private_use_glyphs_are_mapped_back():
-    from extract import clean_thai
+    from app.rag.extract import clean_thai
 
     raw = "ตองสมัคร ไม เปน ออนไลน  รายการ"
     assert clean_thai(raw) == "ต้องสมัคร ไม่ เป็น ออนไลน์ • รายการ"
@@ -50,7 +50,7 @@ def test_extract_text_cleans_thai_glyphs(tmp_path):
 
 
 def test_split_sara_am_is_recomposed():
-    from extract import clean_thai
+    from app.rag.extract import clean_thai
 
     assert clean_thai("ส\u0e4d\u0e32คัญ ต\u0e4d\u0e32บล") == "สำคัญ ตำบล"
 

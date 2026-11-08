@@ -5,7 +5,7 @@ import admin
 import server
 import state
 from creds import CREDS
-from store import Store
+from app.rag.store import Store
 from test_store_ingest import fake_embed
 
 
@@ -151,7 +151,7 @@ def test_reindex_clears_answer_cache(env):
 
 
 def test_file_list_includes_the_thai_summary_of_every_file(env):
-    from ingest import build_index
+    from app.rag.ingest import build_index
     content, store, c = env
     up(c, "form.txt", b"annual leave form " * 10, category="forms", downloadable=True)
     up(c, "policy.txt", b"annual leave ten days " * 10)
@@ -161,7 +161,7 @@ def test_file_list_includes_the_thai_summary_of_every_file(env):
 
 
 def test_summary_still_listed_after_downloadable_is_switched_off(env):
-    from ingest import build_index
+    from app.rag.ingest import build_index
     content, store, c = env
     up(c, "form.txt", b"annual leave form " * 10, category="forms", downloadable=True)
     build_index(content, store, summarize=lambda text: "แบบฟอร์มลา")
@@ -173,7 +173,7 @@ def test_summary_still_listed_after_downloadable_is_switched_off(env):
 
 
 def test_file_that_was_never_downloadable_still_gets_a_description(env):
-    from ingest import build_index
+    from app.rag.ingest import build_index
     content, store, c = env
     up(c, "internal.txt", b"internal policy text " * 10)
     build_index(content, store, summarize=lambda text: "นโยบายภายใน")

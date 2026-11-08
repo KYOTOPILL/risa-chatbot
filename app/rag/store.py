@@ -7,7 +7,7 @@ import chromadb
 import ollama
 
 from app.core.config import EMBED_MODEL, INDEX_DIR
-from docmeta import DocMeta
+from app.rag.docmeta import DocMeta
 
 COLLECTION = "docs"
 NAMES = "names"  # one entry per downloadable file: its name, so file requests never depend on chunk text

@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core import auth
-import extract
+from app.rag import extract
 import server
 import state
 from creds import CREDS

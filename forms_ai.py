@@ -1,8 +1,8 @@
 """AI-drafted online forms: for a required document the model proposes the fields (text, number, date, choice, file) from the type guide. Staff edit and approve them."""
 from pathlib import Path
 
-from extract import extract_text
-from rag import chat
+from app.rag.extract import extract_text
+from app.rag.rag import chat
 from steps_ai import _json
 from tracker import validate_form
 

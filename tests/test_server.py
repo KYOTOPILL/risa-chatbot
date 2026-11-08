@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-import rag
+from app.rag import rag
 import server
 import state
 from creds import CREDS
@@ -55,7 +55,7 @@ def test_chat_questions_run_in_parallel(client):
             running -= 1
         return rag.Reply("ok")
 
-    with patch("rag.answer", slow_answer):
+    with patch("app.rag.rag.answer", slow_answer):
         threads = [threading.Thread(target=post, args=(client, f"q{i}")) for i in range(4)]
         [t.start() for t in threads]
         [t.join() for t in threads]
@@ -73,7 +73,7 @@ def test_one_ip_cannot_flood_but_can_keep_asking(client, monkeypatch):
         time.sleep(0.3)
         return rag.Reply("ok")
 
-    with patch("rag.answer", slow):
+    with patch("app.rag.rag.answer", slow):
         ts = [threading.Thread(target=lambda i=i: codes.append(post(client, f"q{i}").status_code)) for i in range(5)]
         [t.start() for t in ts]
         [t.join() for t in ts]
@@ -83,7 +83,7 @@ def test_one_ip_cannot_flood_but_can_keep_asking(client, monkeypatch):
 
 
 def test_chat_returns_text_and_file_ids(client):
-    with patch("rag.answer", return_value=rag.Reply("ลาพักร้อน 10 วัน", ["abc"], ["policy/leave.pdf"])):
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ลาพักร้อน 10 วัน", ["abc"], ["policy/leave.pdf"])):
         r = post(client)
     assert r.status_code == 200
     assert r.json() == {"text": "ลาพักร้อน 10 วัน", "files": [{"id": "abc", "name": "ใบลา.pdf", "summary": "แบบฟอร์มใบลา", "size": None}]}
@@ -92,24 +92,24 @@ def test_chat_returns_text_and_file_ids(client):
 def test_file_size_comes_from_the_content_folder(client, tmp_path):
     (tmp_path / "policy").mkdir()
     (tmp_path / "policy" / "ใบลา.pdf").write_bytes(b"x" * 2048)
-    with patch("rag.answer", return_value=rag.Reply("ตอบ", ["abc"])), patch.object(server, "CONTENT_DIR", tmp_path):
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ตอบ", ["abc"])), patch.object(server, "CONTENT_DIR", tmp_path):
         assert post(client).json()["files"][0]["size"] == 2048
 
 
 def test_response_never_contains_sources(client):
-    with patch("rag.answer", return_value=rag.Reply("ตอบ", [], ["policy/secret.pdf"])):
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ตอบ", [], ["policy/secret.pdf"])):
         assert "secret" not in post(client).text
 
 
 def test_history_is_passed_as_turns(client):
     hist = [{"role": "user", "content": "คำถามแรก"}, {"role": "assistant", "content": "ตอบแรก"}]
-    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ตอบ")) as ans:
         post(client, history=hist)
     assert [(t.role, t.content) for t in ans.call_args.args[0]] == [("user", "คำถามแรก"), ("assistant", "ตอบแรก")]
 
 
 def test_blank_message_rejected_without_model_call(client):
-    with patch("rag.answer") as ans:
+    with patch("app.rag.rag.answer") as ans:
         assert post(client, message="   ").status_code == 422
     assert ans.call_count == 0
 
@@ -121,7 +121,7 @@ def test_bad_role_or_oversized_input_rejected(client):
 
 
 def test_model_error_returns_thai_503(client):
-    with patch("rag.answer", side_effect=RuntimeError("ollama down")):
+    with patch("app.rag.rag.answer", side_effect=RuntimeError("ollama down")):
         r = post(client)
     assert r.status_code == 503 and "ขัดข้อง" in r.json()["text"]
 
@@ -170,20 +170,20 @@ def test_icons_script_served_and_linked(client):
 
 
 def test_repeated_question_without_history_is_answered_from_cache(client):
-    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ตอบ")) as ans:
         a, b = post(client, "ลากี่วัน"), post(client, "  ลากี่วัน ")
     assert a.json() == b.json() and ans.call_count == 1
 
 
 def test_question_with_history_is_never_cached(client):
     hist = [{"role": "user", "content": "ก"}, {"role": "assistant", "content": "ข"}]
-    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ตอบ")) as ans:
         post(client, "ต่อ", hist), post(client, "ต่อ", hist)
     assert ans.call_count == 2 and state.cache == {}
 
 
 def test_failed_answer_is_not_cached(client):
-    with patch("rag.answer", side_effect=RuntimeError("boom")):
+    with patch("app.rag.rag.answer", side_effect=RuntimeError("boom")):
         assert post(client).status_code == 503
     assert state.cache == {}
 
@@ -208,18 +208,18 @@ def test_stream_sends_deltas_then_the_final_text_and_files(client):
         on_status("กำลังค้นหา...")
         on_delta("ลา"), on_delta("พักร้อน")
         return rag.Reply("ลาพักร้อน 10 วัน", [], [])
-    with patch("rag.answer", fake):
+    with patch("app.rag.rag.answer", fake):
         r, events = stream(client)
     assert r.headers["content-type"].startswith("application/x-ndjson")
     assert events == [{"status": "กำลังค้นหา..."}, {"delta": "ลา"}, {"delta": "พักร้อน"}, {"done": True, "text": "ลาพักร้อน 10 วัน", "files": []}]
 
 
 def test_stream_cached_question_skips_the_model_and_errors_are_thai(client):
-    with patch("rag.answer", return_value=rag.Reply("ตอบ")) as ans:
+    with patch("app.rag.rag.answer", return_value=rag.Reply("ตอบ")) as ans:
         stream(client)
         _, events = stream(client)
     assert ans.call_count == 1 and events == [{"done": True, "text": "ตอบ", "files": []}]
-    with patch("rag.answer", side_effect=RuntimeError("boom")):
+    with patch("app.rag.rag.answer", side_effect=RuntimeError("boom")):
         _, events = stream(client, "คำถามใหม่")
     assert events == [{"error": server.ERROR_TEXT}]
 
@@ -267,7 +267,7 @@ def test_answer_gets_the_askers_own_requests_and_a_personal_reply_is_not_cached(
     def fake(history, message, store, llm=None, on_delta=None, on_status=None, me=None):
         seen.append(me())
         return rag.Reply("ตอบ", personal=True)
-    with patch.object(state, "get_tracker", return_value=tk), patch("rag.answer", fake):
+    with patch.object(state, "get_tracker", return_value=tk), patch("app.rag.rag.answer", fake):
         post(client, "ฉันอยู่ขั้นไหน")
         post(client, "ฉันอยู่ขั้นไหน")
     assert len(seen) == 2 and "Grant - Somchai" in seen[0] and "Form A: ยังไม่ได้ส่ง" in seen[0]  # asked twice: the personal reply was not cached

@@ -2,12 +2,12 @@ import dataclasses
 import logging
 from pathlib import Path
 
-from chunk import chunk_text
+from app.rag.chunk import chunk_text
 from app.core.config import CHUNK_OVERLAP, CHUNK_SIZE, CONTENT_DIR, SUMMARY_CHARS, SUPPORTED_EXTS
-from docmeta import doc_meta
-from extract import extract_text
-from rag import chat
-from store import Store
+from app.rag.docmeta import doc_meta
+from app.rag.extract import extract_text
+from app.rag.rag import chat
+from app.rag.store import Store
 
 log = logging.getLogger("ingest")
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from docmeta import doc_meta
+from app.rag.docmeta import doc_meta
 
 root = Path("/data/content")
 

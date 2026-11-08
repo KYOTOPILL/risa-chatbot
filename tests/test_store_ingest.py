@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pymupdf
 
-from ingest import build_index
-from store import Store
+from app.rag.ingest import build_index
+from app.rag.store import Store
 
 
 def fake_embed(texts):

@@ -1,4 +1,4 @@
-from chunk import chunk_text
+from app.rag.chunk import chunk_text
 
 
 def test_chunks_nonempty_and_overlap():
