@@ -15,8 +15,8 @@ from app.core.auth import User, authenticate, current_user, login_allowed, login
 from app.core.config import COOKIE_SECURE, MAX_UPLOAD_BYTES, MOCK_USERS, SESSION_TTL, UPLOAD_DIR
 from app.rag.extract import extract_pages, extract_text
 from app.rag.rag import chat as llm
-from forms_ai import draft_form
-from steps_ai import draft_steps, screen_document
+from app.features.forms_ai import draft_form
+from app.features.steps_ai import draft_steps, screen_document
 
 router = APIRouter(prefix="/api/track")
 

@@ -4,7 +4,7 @@ import pymupdf
 import pytest
 
 from app.rag.extract import extract_pages
-from steps_ai import draft_steps
+from app.features.steps_ai import draft_steps
 
 GOOD = json.dumps([
     {"title": "ยื่นใบสมัคร", "documents": ["transcript"], "page": 2, "unsure": False},
@@ -61,7 +61,7 @@ def test_extract_pages_non_pdf_is_single_page(tmp_path):
 
 
 # ---- Task 5: screening ----
-from steps_ai import find_template, screen_document
+from app.features.steps_ai import find_template, screen_document
 
 STEP = {"title": "Submit", "documents": ["Proposal", "Budget"], "page": 1, "unsure": False}
 FINDINGS = json.dumps([{"kind": "missing", "text": "Budget section empty"}, {"kind": "unclear", "text": "Dates odd"}])
@@ -97,7 +97,7 @@ def test_find_template_matches_stem_and_returns_none(tmp_path):
 
 def test_screen_keeps_field_and_fix_sorts_by_kind_and_caps_at_eight():
     import json
-    from steps_ai import screen_document
+    from app.features.steps_ai import screen_document
     items = [{"kind": "unclear", "text": " vague "}, {"kind": "missing", "field": "Budget", "text": "absent", "fix": "add it"}] + [{"kind": "incorrect", "text": f"x{i}"} for i in range(9)]
     out = screen_document("t", {"title": "S", "documents": ["D"]}, "D", None, llm=lambda m: json.dumps(items))
     assert len(out) == 8 and out[0] == {"kind": "missing", "text": "absent", "field": "Budget", "fix": "add it"}

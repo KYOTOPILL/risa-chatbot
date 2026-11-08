@@ -1,5 +1,5 @@
-import my_requests
-from tracker import Tracker
+from app.features import my_requests
+from app.features.tracker import Tracker
 
 STEPS = [{"title": "Submit", "documents": ["Form A", "Passport"], "page": 1, "unsure": False}, {"title": "Sign", "documents": [], "page": 1, "unsure": False}]
 

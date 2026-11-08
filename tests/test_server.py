@@ -129,15 +129,15 @@ def test_model_error_returns_thai_503(client):
 def test_download_uses_allow_list(client, tmp_path):
     f = tmp_path / "form.txt"
     f.write_text("hello", encoding="utf-8")
-    with patch("downloads.resolve_download", return_value=f):
+    with patch("app.features.downloads.resolve_download", return_value=f):
         ok = client.get("/download/abc")
     assert ok.status_code == 200 and ok.content == b"hello"
-    with patch("downloads.resolve_download", return_value=None):
+    with patch("app.features.downloads.resolve_download", return_value=None):
         assert client.get("/download/abc").status_code == 404
 
 
 def test_download_route_rejects_path_like_ids(client):
-    with patch("downloads.resolve_download", return_value=None) as rd:
+    with patch("app.features.downloads.resolve_download", return_value=None) as rd:
         client.get("/download/..%2F..%2Fetc%2Fpasswd")
     assert all("/" not in c.args[0] for c in rd.call_args_list)
 
@@ -257,7 +257,7 @@ def test_chat_page_is_for_researchers_others_go_home(client):
 
 
 def test_answer_gets_the_askers_own_requests_and_a_personal_reply_is_not_cached(client, tmp_path):
-    import tracker
+    from app.features import tracker
     tk = tracker.Tracker(tmp_path / "t.db")
     v = tk.create_type("Grant", [{"title": "Submit", "documents": ["Form A"], "page": 1, "unsure": False}], "g.pdf")
     tk.approve(v)

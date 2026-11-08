@@ -3,8 +3,8 @@ from pathlib import Path
 
 from app.rag.extract import extract_text
 from app.rag.rag import chat
-from steps_ai import _json
-from tracker import validate_form
+from app.features.steps_ai import _json
+from app.features.tracker import validate_form
 
 FORM_PROMPT = (
     "You design an online form an applicant fills in on a website for ONE required document of a university research-administration request "

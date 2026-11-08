@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 import server
 import state
 from creds import CREDS
-from tracker import Tracker
+from app.features.tracker import Tracker
 
 STEPS3 = [{"title": t, "documents": [], "page": None, "unsure": False} for t in ("Submit", "Review", "Sign")]
 
@@ -107,7 +107,7 @@ def test_move_works_and_out_of_range_400(env):
 # ---- Task 4: AI-drafted type steps ----
 import json
 
-import tracker_api
+from app.features import tracker_api
 
 GOOD = json.dumps([{"title": "Submit", "documents": ["Form A"], "page": 1, "unsure": False}])
 

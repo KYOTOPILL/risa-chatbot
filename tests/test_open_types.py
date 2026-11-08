@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 import server
 import state
 from creds import CREDS
-from tracker import Tracker
+from app.features.tracker import Tracker
 
 STEPS = [{"title": "Submit", "documents": ["Form A", "Form B"], "page": 1, "unsure": True}, {"title": "Review", "documents": [], "page": 2, "unsure": False}]
 

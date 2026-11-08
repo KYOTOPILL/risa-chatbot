@@ -12,9 +12,9 @@ from pydantic import BaseModel, Field, StringConstraints
 from typing_extensions import Annotated
 
 import admin
-import my_requests
-import tracker_api
-import downloads
+from app.features import my_requests
+from app.features import tracker_api
+from app.features import downloads
 from app.rag import rag
 import state
 from app.core.auth import User, current_user, require_researcher

@@ -3,12 +3,12 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-import forms_ai
+from app.features import forms_ai
 import server
 import state
-import tracker_api
+from app.features import tracker_api
 from creds import CREDS
-from tracker import Tracker, validate_form
+from app.features.tracker import Tracker, validate_form
 
 FORM = json.dumps({"title": "Travel claim", "fields": [
     {"label": "Applicant name", "hint": "as on passport", "type": "text", "required": True},
@@ -274,7 +274,7 @@ def test_progress_error_comes_as_an_error_line_and_validation_stays_a_plain_400(
     _, _, tid, _ = env
     s1 = client("s1")
     s1.post(f"/api/track/types/{tid}/forms/approve", json={"doc_name": "Travel claim"})  # nothing drafted: plain 404 before streaming
-    import tracker_api as t
+    from app.features import tracker_api as t
     old = t.llm
     t.llm = lambda m: "garbage"
     try:
