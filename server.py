@@ -16,7 +16,7 @@ from app.features import my_requests
 from app.features import tracker_api
 from app.features import downloads
 from app.rag import rag
-import state
+from app.core import state
 from app.core.auth import User, current_user, require_researcher
 from app.core.config import CONTENT_DIR, ROOT
 

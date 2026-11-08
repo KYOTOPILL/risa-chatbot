@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.features import forms_ai
 import server
-import state
+from app.core import state
 from app.features import tracker_api
 from creds import CREDS
 from app.features.tracker import Tracker, validate_form

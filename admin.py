@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-import state
+from app.core import state
 from app.core.config import CONTENT_DIR, SUPPORTED_EXTS
 from app.rag.docmeta import SHAREABLE, doc_meta
 from app.rag.ingest import build_index, summarize

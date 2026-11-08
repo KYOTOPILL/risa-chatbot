@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 import admin
 import server
-import state
+from app.core import state
 from creds import CREDS
 from app.rag.store import Store
 from test_store_ingest import fake_embed

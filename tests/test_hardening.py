@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.core import auth
 from app.rag import extract
 import server
-import state
+from app.core import state
 from creds import CREDS
 
 
