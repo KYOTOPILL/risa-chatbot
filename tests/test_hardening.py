@@ -4,7 +4,7 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-import auth
+from app.core import auth
 import extract
 import server
 import state
@@ -43,7 +43,7 @@ def test_zip_bomb_is_refused(tmp_path, monkeypatch):
 
 def test_per_minute_limit(monkeypatch):
     state._starts.clear()
-    monkeypatch.setattr("config.MAX_PER_MIN", 2)
+    monkeypatch.setattr("app.core.config.MAX_PER_MIN", 2)
     results = []
     for _ in range(3):
         with state.slot("u") as ok:

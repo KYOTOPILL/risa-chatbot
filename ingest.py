@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from chunk import chunk_text
-from config import CHUNK_OVERLAP, CHUNK_SIZE, CONTENT_DIR, SUMMARY_CHARS, SUPPORTED_EXTS
+from app.core.config import CHUNK_OVERLAP, CHUNK_SIZE, CONTENT_DIR, SUMMARY_CHARS, SUPPORTED_EXTS
 from docmeta import doc_meta
 from extract import extract_text
 from rag import chat

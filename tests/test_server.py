@@ -66,7 +66,7 @@ def test_one_ip_cannot_flood_but_can_keep_asking(client, monkeypatch):
     import threading
     import time
 
-    monkeypatch.setattr("config.MAX_INFLIGHT", 2)
+    monkeypatch.setattr("app.core.config.MAX_INFLIGHT", 2)
     codes = []
 
     def slow(history, message, store, **kw):

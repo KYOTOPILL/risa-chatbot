@@ -2,7 +2,7 @@ import os
 import secrets
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 CONTENT_DIR = ROOT / "content"
 INDEX_DIR = ROOT / "index"
 

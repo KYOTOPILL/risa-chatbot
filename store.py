@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import ollama
 
-from config import EMBED_MODEL, INDEX_DIR
+from app.core.config import EMBED_MODEL, INDEX_DIR
 from docmeta import DocMeta
 
 COLLECTION = "docs"

@@ -4,7 +4,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from config import HR_CONTACT
+from app.core.config import HR_CONTACT
 import rag
 from rag import Reply, Turn, answer, is_mostly_thai
 

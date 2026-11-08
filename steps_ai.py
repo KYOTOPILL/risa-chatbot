@@ -4,7 +4,7 @@ import re
 
 from pathlib import Path
 
-from config import CONTENT_DIR
+from app.core.config import CONTENT_DIR
 from rag import chat
 
 DRAFT_PROMPT = (

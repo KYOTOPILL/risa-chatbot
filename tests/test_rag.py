@@ -1,7 +1,7 @@
 import json
 
 import rag
-from config import HR_CONTACT
+from app.core.config import HR_CONTACT
 from rag import Turn, answer, is_mostly_thai
 from store import Hit, NameHit
 

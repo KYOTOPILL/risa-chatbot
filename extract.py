@@ -8,7 +8,7 @@ from docx import Document
 from docx.text.paragraph import Paragraph
 from pptx import Presentation
 
-from config import SUPPORTED_EXTS
+from app.core.config import SUPPORTED_EXTS
 
 
 def _pdf(path: Path) -> str:

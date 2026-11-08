@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request
 
-from config import MOCK_USERS, SESSION_SECRET, SESSION_TTL
+from app.core.config import MOCK_USERS, SESSION_SECRET, SESSION_TTL
 
 
 @dataclass

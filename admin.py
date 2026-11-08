@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from pydantic import BaseModel
 
 import state
-from config import CONTENT_DIR, SUPPORTED_EXTS
+from app.core.config import CONTENT_DIR, SUPPORTED_EXTS
 from docmeta import SHAREABLE, doc_meta
 from ingest import build_index, summarize
 from store import display_summary
-from auth import require_staff
+from app.core.auth import require_staff
 
 MAX_BYTES = 25 * 1024 * 1024
 BAD_CATEGORY = re.compile(r"[/\\\x00-\x1f]")

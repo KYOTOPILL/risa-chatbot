@@ -9,3 +9,8 @@ graphify-out/
 tracker.db
 uploads/
 .court/
+
+# content/: only the shareable folders are public; everything else stays local
+content/**
+!content/**/
+!content/**/shareable/**

@@ -17,8 +17,8 @@ import tracker_api
 import downloads
 import rag
 import state
-from auth import User, current_user, require_researcher
-from config import CONTENT_DIR, ROOT
+from app.core.auth import User, current_user, require_researcher
+from app.core.config import CONTENT_DIR, ROOT
 
 log = logging.getLogger("chatbot")
 if not log.handlers:  # answer sources go here, never to the browser

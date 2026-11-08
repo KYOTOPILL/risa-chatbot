@@ -1,4 +1,4 @@
-from config import HR_CONTACT
+from app.core.config import HR_CONTACT
 from evals.run_eval import check, run
 from rag import Reply
 

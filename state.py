@@ -3,8 +3,8 @@ import time
 from contextlib import contextmanager
 from functools import lru_cache
 
-import config
-from config import TRACKER_DB
+from app.core import config
+from app.core.config import TRACKER_DB
 from store import Store
 from tracker import Tracker
 

@@ -1,5 +1,5 @@
 """What the chat may tell a researcher about their own requests. Built only from that researcher's data."""
-from config import MOCK_USERS
+from app.core.config import MOCK_USERS
 
 DOC_STATUS = {"draft": "บันทึกแบบร่างไว้ ยังกรอกไม่ครบและยังไม่ได้ส่ง", "screened": "AI ตรวจสอบแล้ว แต่ยังไม่ได้ส่งให้เจ้าหน้าที่", "cannot_check": "บันทึกแล้ว AI ตรวจสอบไม่ได้ ยังไม่ได้ส่งให้เจ้าหน้าที่",
               "sent": "ส่งแล้ว รอเจ้าหน้าที่ตรวจสอบ", "approved": "อนุมัติแล้ว"}

@@ -11,8 +11,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 import state
-from auth import User, authenticate, current_user, login_allowed, login_failed, require_staff, session_value
-from config import COOKIE_SECURE, MAX_UPLOAD_BYTES, MOCK_USERS, SESSION_TTL, UPLOAD_DIR
+from app.core.auth import User, authenticate, current_user, login_allowed, login_failed, require_staff, session_value
+from app.core.config import COOKIE_SECURE, MAX_UPLOAD_BYTES, MOCK_USERS, SESSION_TTL, UPLOAD_DIR
 from extract import extract_pages, extract_text
 from rag import chat as llm
 from forms_ai import draft_form

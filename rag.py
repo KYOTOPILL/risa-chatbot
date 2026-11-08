@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from config import ROOT, CHAT_BASE_URL, CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
+from app.core.config import ROOT, CHAT_BASE_URL, CHAT_MODEL, HR_CONTACT, MAX_DISTANCE, THAI_MIN_RATIO, TOP_K
 
 NOT_FOUND = f"ขออภัย ไม่พบข้อมูลที่เกี่ยวข้องในเอกสาร กรุณาติดต่อ {HR_CONTACT}"
 FILE_READY = "นี่คือไฟล์ที่เกี่ยวข้องค่ะ"
