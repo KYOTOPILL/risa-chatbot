@@ -1,10 +1,11 @@
 """Who is asking. The one place to swap when real CMU email login replaces the mock login."""
 import hmac
+import time
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request
 
-from config import MOCK_USERS, SESSION_SECRET
+from config import MOCK_USERS, SESSION_SECRET, SESSION_TTL
 
 
 @dataclass
@@ -27,12 +28,29 @@ def authenticate(username: str, password: str) -> str | None:
 
 
 def session_value(uid: str) -> str:
-    return f"{uid}.{_sign(uid)}"
+    exp = int(time.time()) + SESSION_TTL
+    return f"{uid}.{exp}.{_sign(f'{uid}.{exp}')}"
+
+
+_fails: dict[str, list[float]] = {}  # "ip|username" -> times of recent wrong logins
+MAX_FAILS, FAIL_WINDOW = 5, 300
+
+
+def login_allowed(key: str) -> bool:
+    now = time.time()
+    recent = _fails[key] = [t for t in _fails.get(key, []) if now - t < FAIL_WINDOW]
+    return len(recent) < MAX_FAILS
+
+
+def login_failed(key: str) -> None:  # ponytail: in memory, per ip+username; shared store if more than one server process runs
+    _fails.setdefault(key, []).append(time.time())
 
 
 def current_user(request: Request) -> User:
-    uid, _, sig = request.cookies.get("uid", "").partition(".")
-    if uid not in MOCK_USERS or not hmac.compare_digest(sig, _sign(uid)):
+    uid, _, rest = request.cookies.get("uid", "").partition(".")
+    exp, _, sig = rest.partition(".")
+    if (uid not in MOCK_USERS or not exp.isdigit() or int(exp) < time.time()
+            or not hmac.compare_digest(sig.encode(), _sign(f"{uid}.{exp}").encode())):
         raise HTTPException(401, "login required")
     u = MOCK_USERS[uid]
     return User(uid, u["name"], u["role"])

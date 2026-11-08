@@ -11,8 +11,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 import state
-from auth import User, authenticate, current_user, require_staff, session_value
-from config import MAX_UPLOAD_BYTES, MOCK_USERS, UPLOAD_DIR
+from auth import User, authenticate, current_user, login_allowed, login_failed, require_staff, session_value
+from config import COOKIE_SECURE, MAX_UPLOAD_BYTES, MOCK_USERS, SESSION_TTL, UPLOAD_DIR
 from extract import extract_pages, extract_text
 from rag import chat as llm
 from forms_ai import draft_form
@@ -54,11 +54,15 @@ def mock_users(_user: User = Depends(current_user)):
 
 
 @router.post("/login")
-def login(body: LoginIn, response: Response):
+def login(body: LoginIn, request: Request, response: Response):
+    key = f"{request.client.host if request.client else ''}|{body.username.lower()}"
+    if not login_allowed(key):
+        raise HTTPException(429, "too many wrong tries, wait a few minutes")
     uid = authenticate(body.username, body.password)
     if uid is None:
+        login_failed(key)
         raise HTTPException(401, "wrong username or password")
-    response.set_cookie("uid", session_value(uid), httponly=True, samesite="lax")
+    response.set_cookie("uid", session_value(uid), httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_TTL)
     return {"id": uid, "name": MOCK_USERS[uid]["name"], "role": MOCK_USERS[uid]["role"]}
 
 
@@ -142,6 +146,8 @@ def reassign(sid: int, body: StaffIn, user: User = Depends(require_staff)):
     return {"ok": True}
 
 
+MAX_DIR_BYTES = 200 * 1024 * 1024  # all files of one request
+MAX_FORM_FILES = 10
 UPLOAD_EXTS = {".pdf", ".docx"}
 
 
@@ -155,6 +161,8 @@ def _save_upload(file: UploadFile, subdir: str, exts=None) -> Path:
         raise HTTPException(413, "file too large")
     dest = UPLOAD_DIR / subdir
     dest.mkdir(parents=True, exist_ok=True)
+    if subdir != "types" and sum(p.stat().st_size for p in dest.iterdir()) + len(data) > MAX_DIR_BYTES:
+        raise HTTPException(413, "too many files for this request")
     path = dest / f"{secrets.token_hex(4)}_{name}"
     path.write_bytes(data)
     return path
@@ -470,12 +478,22 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 def _answers(form: dict, raw: dict, files: dict, prev: list, sid: int, draft: bool = False) -> list:
     """Checks the researcher's answers against the approved form. Returns a snapshot (label and type included) so later form edits never change what staff review."""
     old = {a["key"]: a["value"] for a in prev}
-    out = []
+    out, saved = [], []
+    try:
+        return _check_answers(form, raw, files, old, sid, draft, out, saved)
+    except HTTPException:
+        for p in saved:  # a rejected save must not leave its files behind
+            p.unlink(missing_ok=True)
+        raise
+
+
+def _check_answers(form, raw, files, old, sid, draft, out, saved) -> list:
     for f in form["fields"]:
         k, kind, v = f["key"], f["type"], raw.get(f["key"])
         if kind == "file":
             if k in files:
                 path = _save_upload(files[k], f"submissions/{sid}", ATTACH_EXTS)
+                saved.append(path)
                 v = {"name": files[k].filename or path.name, "path": str(path)}
             else:
                 v = old.get(k) if isinstance(old.get(k), dict) else None
@@ -528,6 +546,8 @@ def submit_form(request: Request, sid: int, doc_name: str = Form(...), answers: 
         assert isinstance(raw, dict)
     except Exception:
         raise HTTPException(400, "answers must be a JSON object")
+    if len(files) > MAX_FORM_FILES:
+        raise HTTPException(400, "too many files")
     prev = next((u["answers"] for u in sorted(sub["uploads"], key=lambda u: -u["id"]) if u["doc_name"] == doc_name), [])
     snap = _answers(form, raw, dict(zip(file_keys, files)), prev, sid, draft)  # checked and files saved before streaming: the uploads are closed once this handler returns
 

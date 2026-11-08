@@ -21,6 +21,7 @@ class FakeStore:
 @pytest.fixture(autouse=True)
 def clean_cache():
     state.cache.clear()
+    state._starts.clear()  # the per-minute limit counts across tests otherwise
     yield
     state.cache.clear()
 

@@ -62,7 +62,7 @@ def chat(body: ChatIn, request: Request, user: User = Depends(require_researcher
     try:
         reply = state.cache.get(key)
         if reply is None:
-            with state.slot(request.client.host if request.client else "") as ok:
+            with state.slot(user.id) as ok:
                 if not ok:  # this IP already has its allowed questions being answered
                     return JSONResponse({"text": BUSY_TEXT, "files": []}, status_code=429)
                 reply = rag.answer(history, body.message, state.get_store(), me=lambda: my_requests.describe(state.get_tracker(), user.id))
@@ -94,7 +94,6 @@ def chat_stream(body: ChatIn, request: Request, user: User = Depends(require_res
     the text so far), then {"done": true, "text", "files"} with the final text, or {"error": text}."""
     history = [rag.Turn(t.role, t.content) for t in body.history]
     key = " ".join(body.message.split()).casefold() if not history else None
-    ip = request.client.host if request.client else ""
     line = lambda o: json.dumps(o, ensure_ascii=False) + "\n"
 
     def events():
@@ -104,7 +103,7 @@ def chat_stream(body: ChatIn, request: Request, user: User = Depends(require_res
 
             def work():
                 try:
-                    with state.slot(ip) as ok:
+                    with state.slot(user.id) as ok:
                         if not ok:
                             q.put(("error", BUSY_TEXT))
                             return

@@ -1,4 +1,5 @@
 import re
+import zipfile
 from pathlib import Path
 
 import openpyxl
@@ -95,10 +96,17 @@ def clean_thai(text: str) -> str:
     return text.replace("\u0e4d\u0e32", "\u0e33")  # PDFs often split sara am into nikhahit + sara aa
 
 
+MAX_UNZIPPED = 100 * 1024 * 1024  # a small .docx/.xlsx/.pptx can unpack to gigabytes
+
+
 def extract_text(path: Path) -> str:
     ext = path.suffix.lower()
     if ext not in SUPPORTED_EXTS:
         raise ValueError(f"unsupported file type: {path.name}")
+    if ext in (".docx", ".xlsx", ".pptx"):
+        with zipfile.ZipFile(path) as z:
+            if sum(i.file_size for i in z.infolist()) > MAX_UNZIPPED:
+                raise ValueError("file unpacks too large")
     if ext == ".pdf":
         text = _pdf(path)
     elif ext == ".docx":

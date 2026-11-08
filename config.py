@@ -36,6 +36,11 @@ MOCK_USERS = {
     "s1": {"name": "Malee", "role": "staff", "username": "malee", "password": "malee123"},
     "s2": {"name": "Anan", "role": "staff", "username": "anan", "password": "anan123"},
 }
+for _uid, _u in MOCK_USERS.items():  # RISA_PASSWORD_S1=... replaces a demo password; set all four before anyone else can reach the app
+    _u["password"] = os.environ.get(f"RISA_PASSWORD_{_uid.upper()}") or _u["password"]
+SESSION_TTL = 8 * 3600  # seconds a login lasts
+COOKIE_SECURE = os.environ.get("RISA_COOKIE_SECURE") == "1"  # set to 1 when served over HTTPS
+MAX_PER_MIN = int(os.environ.get("RISA_MAX_PER_MIN", "20"))  # chat questions one user may start per minute; 0 = off
 SESSION_SECRET = os.environ.get("RISA_SESSION_SECRET") or secrets.token_hex(32)  # unset: logins end when the server restarts
 TRACKER_DB = ROOT / "tracker.db"
 UPLOAD_DIR = ROOT / "uploads"
