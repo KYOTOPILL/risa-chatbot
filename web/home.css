@@ -344,3 +344,7 @@ mark { background: rgba(245,158,11,.25); border-radius: 3px; padding: 0 2px; }
 .lk[disabled] { opacity: .35; cursor: default; }
 
 .page-title { margin-top: 20px; }
+
+.fold > summary { cursor: pointer; font-weight: 600; font-size: 1.05rem; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold[open] > summary { margin-bottom: 12px; }

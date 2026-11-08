@@ -405,27 +405,33 @@ async function staffTypes(body) {
     const by = await formsByDoc(t), docs = docsOf(t);
     return [t.id, docs.length ? "แบบฟอร์มพร้อมใช้งาน " + docs.filter((d) => by[d]?.status === "approved").length + "/" + docs.length : "ไม่มีเอกสาร"];
   })));
+  const cats = await api("/categories");
+  const row = (t) => h("div", { class: "list-row" },
+    h("span", { class: "grow" }, h("b", {}, t.type_name), " ", h("span", { class: "muted" }, "v" + t.version),
+      h("span", { class: "muted block" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : t.steps.length + " ขั้นตอน · " + counts[t.id])),
+    t.status === "approved" && t.open ? h("span", { class: "badge ok" }, "เปิดรับงาน") : null,
+    t.status === "draft" ? h("span", { class: "tools" }, h("button", { class: "ghost danger", type: "button", onclick: removeButton("ลบฉบับร่าง “" + t.type_name + "”?", "/versions/" + t.id) }, "ลบ"),
+      h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจสอบและอนุมัติ"))
+      : h("button", { class: "ghost", type: "button", onclick: () => { openType = t.type_id; staffHome(); } }, "จัดการ"));
+  const known = new Set(cats.map((c) => c.id)), other = types.filter((t) => !known.has(t.category_id));
+  const groups = [...cats.map((c) => ({ name: c.name, items: types.filter((t) => t.category_id === c.id) })), ...(other.length ? [{ name: "อื่น ๆ", items: other }] : [])];
   body.append(h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "จัดการขั้นตอน เอกสาร แบบฟอร์ม และสถานะการเปิดรับงานได้ในที่เดียว"),
-    h("section", { class: "card" }, types.length ? types.map((t) => h("div", { class: "list-row" },
-      h("span", { class: "grow" }, h("b", {}, t.type_name), " ", h("span", { class: "muted" }, "v" + t.version),
-        h("span", { class: "muted block" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : t.steps.length + " ขั้นตอน · " + counts[t.id])),
-      t.status === "approved" && t.open ? h("span", { class: "badge ok" }, "เปิดรับงาน") : null,
-      t.status === "draft" ? h("span", { class: "tools" }, h("button", { class: "ghost danger", type: "button", onclick: removeButton("ลบฉบับร่าง “" + t.type_name + "”?", "/versions/" + t.id) }, "ลบ"),
-        h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจสอบและอนุมัติ"))
-        : h("button", { class: "ghost", type: "button", onclick: () => { openType = t.type_id; staffHome(); } }, "จัดการ")))
-      : h("p", { class: "muted" }, "ยังไม่มีประเภทงาน อัปโหลดคู่มือด้านล่างเพื่อเริ่ม")),
-    h("section", { class: "card" }, h("h2", {}, "สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI ช่วยร่างขั้นตอนและเอกสารที่ต้องส่ง เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งาน"), name,
+    groups.length ? groups.map((g) => h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, g.name), h("small", { class: "muted" }, g.items.length ? g.items.length + " ประเภท" : "ว่าง")),
+      g.items.length ? g.items.map(row) : h("p", { class: "muted" }, "ยังไม่มีประเภทงานในหมวดนี้")))
+      : h("section", { class: "card" }, h("p", { class: "muted" }, "ยังไม่มีประเภทงาน อัปโหลดคู่มือด้านล่างเพื่อเริ่ม")),
+    h("details", { class: "card fold", open: !types.length }, h("summary", {}, "+ สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI ช่วยร่างขั้นตอนและเอกสารที่ต้องส่ง เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งาน"), name,
       h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารเพื่อให้ AI ร่างขั้นตอน"))),
-    await categoryManager());
+    categoryManager(cats));
 }
 
 // the list of categories researchers see types grouped under: add, rename, reorder, delete (only when empty)
-async function categoryManager() {
-  const cats = await api("/categories"), newName = h("input", { type: "text", placeholder: "ชื่อหมวดใหม่", "aria-label": "ชื่อหมวดใหม่" });
+let catsOpen = false;  // the manager stays open while the page redraws after each change
+function categoryManager(cats) {
+  const newName = h("input", { type: "text", placeholder: "ชื่อหมวดใหม่", "aria-label": "ชื่อหมวดใหม่" });
   const after = () => staffHome();
   const order = (i, d) => act(async () => { const ids = cats.map((c) => c.id); [ids[i], ids[i + d]] = [ids[i + d], ids[i]]; await api("/categories/order", send("PUT", { ids })); after(); });
   const lk = (text, onclick, disabled = false, cls = "") => h("button", { class: "lk " + cls, type: "button", disabled, onclick }, text);
-  return h("section", { class: "card" }, h("h2", {}, "จัดการหมวดหมู่"), h("p", { class: "muted sub" }, "นักวิจัยเห็นประเภทงานแยกตามหมวดหมู่ ลำดับด้านล่างคือลำดับที่นักวิจัยเห็น"),
+  return h("details", { class: "card fold", open: catsOpen, ontoggle: (ev) => { catsOpen = ev.target.open; } }, h("summary", {}, "จัดการหมวดหมู่ (" + cats.length + ")"), h("p", { class: "muted sub" }, "นักวิจัยเห็นประเภทงานแยกตามหมวดหมู่ ลำดับด้านล่างคือลำดับที่นักวิจัยเห็น"),
     cats.length ? cats.map((c, i) => h("div", { class: "crow" }, h("span", {}, c.name), h("small", { class: "muted" }, c.types ? c.types + " ประเภท" : "ว่าง"),
       h("span", { class: "tools" }, lk("↑", order(i, -1), i === 0), lk("↓", order(i, 1), i === cats.length - 1),
         lk("แก้ชื่อ", act(async () => { const n = prompt("ชื่อหมวดใหม่", c.name); if (n && n.trim()) { await api("/categories/" + c.id, send("PUT", { name: n })); after(); } })),
