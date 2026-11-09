@@ -13,10 +13,11 @@ from typing_extensions import Annotated
 
 from app.api import admin
 from app.features import my_requests
-from app.features import tracker_api
+from app.features import line_bot, tracker_api
 from app.features import downloads
 from app.rag import rag
 from app.core import state
+from app.features.tracker import Tracker
 from app.core.auth import User, current_user, require_researcher
 from app.core.config import CONTENT_DIR, ROOT
 
@@ -53,6 +54,8 @@ class RevalidatingStatic(StaticFiles):
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(admin.router)
 app.include_router(tracker_api.router)
+app.include_router(line_bot.router)
+Tracker.on_notify = staticmethod(line_bot.alert)  # in-app notifications are also pushed to LINE
 
 
 @app.post("/api/chat")

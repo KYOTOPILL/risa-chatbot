@@ -42,6 +42,11 @@ SESSION_TTL = 8 * 3600  # seconds a login lasts
 COOKIE_SECURE = os.environ.get("RISA_COOKIE_SECURE") == "1"  # set to 1 when served over HTTPS
 MAX_PER_MIN = int(os.environ.get("RISA_MAX_PER_MIN", "20"))  # chat questions one user may start per minute; 0 = off
 SESSION_SECRET = os.environ.get("RISA_SESSION_SECRET") or secrets.token_hex(32)  # unset: logins end when the server restarts
+# LINE Official Account chatbot (Messaging API). Unset secret = the webhook is off.
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+PUBLIC_URL = os.environ.get("RISA_PUBLIC_URL", "").rstrip("/")  # https address of this server: file links sent through LINE start with it
+LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "")  # e.g. @123abcde, shown next to the link code on the web page
 TRACKER_DB = ROOT / "tracker.db"
 UPLOAD_DIR = ROOT / "uploads"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
