@@ -29,6 +29,7 @@ const ICONS = {
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   chat: "M4 5h16v11H9l-5 4z",
   check: "m5 12 5 5 9-10",
+  users: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14a6.5 6.5 0 0 1 3.5 6",
   form: "M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7",
 };
 function icon(name) {

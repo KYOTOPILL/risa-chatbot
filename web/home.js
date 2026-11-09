@@ -276,7 +276,7 @@ let filesRoot = null, filesTab = null;  // the file manager: built once, kept in
 async function staffHome() {
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
   const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
-  const items = [["queue", "queue", "รอตรวจสอบ", queue.length], ["subs", "list", "งานทั้งหมด"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "คลังเอกสาร"]];
+  const items = [["queue", "queue", "รอตรวจสอบ", queue.length], ["subs", "list", "งานทั้งหมด"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "คลังเอกสาร"], null, ["users", "users", "ผู้ใช้"]];
   const body = h("div", { class: "ws-main" });
   const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; openGroup = null; staffHome(); } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
@@ -284,10 +284,108 @@ async function staffHome() {
   body.append(sk);
   body.setAttribute("aria-busy", "true");
   show(h("div", { class: "ws" }, menu, body));
-  await ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles })[tab](body).catch(fail).finally(() => { sk.remove(); body.removeAttribute("aria-busy"); });
+  await ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles, users: staffUsers })[tab](body).catch(fail).finally(() => { sk.remove(); body.removeAttribute("aria-busy"); });
 }
 // redraw after a change in place, keeping the scroll position (the page empties while it reloads)
 async function redraw() { const y = scrollY; await staffHome(); scrollTo(0, y); }
+
+// access list: only people staff add here can log in. Searched and paged on the server (it can hold thousands); roles change and access turns off here
+async function staffUsers(body) {
+  let view = "", q = "", seq = 0, timer = null, items = [], total = 0, counts = {};
+  const list = h("div", { class: "ulist" }), chips = h("div", { class: "chips2", role: "group", "aria-label": "กรอง" }), more = h("button", { class: "ghost more", type: "button", hidden: true }), note = h("p", { class: "muted", role: "status" });
+  const find = h("input", { type: "search", placeholder: "ค้นหาชื่อหรืออีเมล", "aria-label": "ค้นหา", autocomplete: "off", oninput: () => { clearTimeout(timer); timer = setTimeout(() => load(true), 250); } });
+  const VIEWS = [["", "ทั้งหมด"], ["staff", "เจ้าหน้าที่"], ["researcher", "นักวิจัย"], ["disabled", "ปิดใช้งาน"]];
+  const call = (path, method, payload) => api("/users/" + path, send(method, payload));
+  const load = async (fresh) => {
+    const mine = ++seq, off = fresh ? 0 : items.length;
+    const r = await api("/users/page?view=" + view + "&offset=" + off + "&limit=50&q=" + encodeURIComponent(find.value.trim())).catch((e) => { fail(e); return null; });
+    if (mine !== seq || !r) return;  // a newer search is already running
+    items = fresh ? r.items : items.concat(r.items); total = r.total; counts = r.counts; draw();
+  };
+  const reload = () => load(true);
+  // after a change the row stays where it is (the list is not re-sorted or re-filtered under the cursor); only the chip counts are refreshed
+  const changed = async (u, patch) => { Object.assign(u, patch); draw(); const r = await api("/users/page?limit=1").catch(() => null); if (r) { counts = r.counts; draw(); } };
+  const row = (u) => {
+    const mineRow = u.id === me.id;
+    const role = h("select", { class: "field", "aria-label": "บทบาทของ " + u.name, disabled: mineRow || !u.active, onchange: act(async () => {
+      if (role.value === "staff" && !confirm("ตั้ง " + u.name + " เป็นเจ้าหน้าที่?\nเจ้าหน้าที่จะเห็นเอกสารของนักวิจัยทุกคนและตรวจอนุมัติได้")) { role.value = u.role; return; }
+      try { await call(encodeURIComponent(u.id) + "/role", "PUT", { role: role.value }); toast(u.name + " เป็น" + ROLE[role.value] + "แล้ว"); } catch (e) { role.value = u.role; throw e; }
+      changed(u, { role: role.value });
+    }) }, Object.entries(ROLE).map(([v, t]) => h("option", { value: v, selected: v === u.role }, t)));
+    const power = mineRow ? h("small", { class: "muted" }, "ของตัวเองเปลี่ยนไม่ได้")
+      : h("button", { class: "ghost", type: "button", onclick: act(async () => {
+        if (u.active && !confirm("ปิดใช้งาน " + u.name + "?\nเขาจะเข้าระบบไม่ได้และตัดการเชื่อม LINE ประวัติงานยังอยู่ เปิดใช้งานใหม่ได้ภายหลัง")) return;
+        await call(encodeURIComponent(u.id) + "/active", "PUT", { active: !u.active }); toast(u.name + (u.active ? " ถูกปิดใช้งานแล้ว" : " เปิดใช้งานแล้ว")); changed(u, { active: !u.active });
+      }) }, u.active ? "ปิดใช้งาน" : "เปิดใช้งาน");
+    return h("div", { class: "urow" + (u.active ? "" : " off") },
+      h("div", { class: "who" }, h("span", { class: "av" }, u.name[0].toUpperCase()), h("div", {}, h("b", {}, u.name, mineRow ? h("span", { class: "muted" }, " (คุณ)") : null, u.joined ? null : h("span", { class: "pill wait" }, "ยังไม่เคยเข้าระบบ")), h("small", { class: "muted" }, u.id))),
+      h("div", { class: "uact" }, role, power));
+  };
+  const draw = () => {
+    chips.replaceChildren(...VIEWS.map(([v, t]) => h("button", { class: "chip2", type: "button", "aria-pressed": String(v === view), onclick: () => { view = v; reload(); } }, t + " " + (counts[v] ?? ""))));
+    list.replaceChildren(...(items.length ? items.map(row) : [h("p", { class: "muted" }, find.value.trim() ? "ไม่พบผู้ใช้ที่ตรงกับ “" + find.value.trim() + "”" : "ยังไม่มีผู้ใช้ในหมวดนี้")]));
+    more.hidden = items.length >= total; more.textContent = "แสดงเพิ่ม (อีก " + (total - items.length) + " คน)"; more.onclick = () => load(false);
+    note.textContent = items.length ? "แสดง " + items.length + " จาก " + total + " คน" : "";
+  };
+  // add people: type an email and press Enter (or paste a list) and each becomes a chip; a chip shows its own state, the server says who exists already
+  const addDialog = () => {
+    const EMAIL = /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/;
+    let chips = [], seen = {}, seq = 0;  // seen: email -> what the server says (new, exists, disabled, invalid)
+    const kind = (e) => !EMAIL.test(e) || seen[e] === "invalid" ? "bad" : seen[e] === "exists" || seen[e] === "disabled" ? "have" : /(^|\.)cmu\.ac\.th$/.test(e.split("@")[1]) ? "ok" : "warn";
+    const TITLE = { bad: "อีเมลไม่ถูกต้อง", have: "มีอยู่แล้ว จะถูกข้าม", warn: "ไม่ใช่ @cmu.ac.th เข้าด้วยบัญชี CMU ไม่ได้", ok: "" };
+    const inp = h("input", { type: "text", "aria-label": "อีเมล", placeholder: "พิมพ์อีเมลแล้วกด Enter", autocomplete: "off", autocapitalize: "none", spellcheck: false });
+    const wrap = h("div", { class: "field-chips", role: "group", "aria-label": "อีเมลที่จะเพิ่ม", onclick: () => inp.focus() });
+    const note = h("p", { class: "note3", role: "status" });
+    const role = h("select", { class: "field", "aria-label": "บทบาท" }, Object.entries(ROLE).map(([v, t]) => h("option", { value: v }, t)));
+    const draw = () => {
+      wrap.replaceChildren(...chips.map((c, i) => { const k = kind(c); return h("span", { class: "chip3 " + (k === "ok" ? "" : k), title: TITLE[k] },
+        h("span", {}, c), h("button", { type: "button", "aria-label": "ลบ " + c, onclick: (e) => { e.stopPropagation(); chips.splice(i, 1); draw(); inp.focus(); } }, "✕")); }), inp);
+      const n = { ok: 0, bad: 0, have: 0, warn: 0 }; chips.forEach((c) => n[kind(c)]++);
+      const add = n.ok + n.warn;
+      go.disabled = !add; go.textContent = add ? "เพิ่ม " + add + " คน" : "เพิ่ม";
+      const bits = [n.bad ? h("span", { class: "e" }, n.bad + " อีเมลไม่ถูกต้อง (จะถูกข้าม)") : null, n.have ? h("span", {}, n.have + " มีอยู่แล้ว (จะถูกข้าม)") : null, n.warn ? h("span", { class: "w" }, n.warn + " ไม่ใช่ @cmu.ac.th") : null].filter(Boolean);
+      note.replaceChildren(...bits.flatMap((b, i) => i ? [" · ", b] : [b]));
+    };
+    const check = async () => {
+      const mine = ++seq, todo = chips.filter((c) => EMAIL.test(c) && !(c in seen));
+      if (!todo.length) return;
+      const r = await call("preview", "POST", { emails: todo.join("\n") }).catch(() => null);
+      if (mine !== seq || !r) return;  // a newer change is already being checked
+      r.rows.forEach((x) => { seen[x.email] = x.status; }); draw();
+    };
+    const take = (raw) => {
+      for (const t of raw.split(/[\s,;]+/).map((x) => x.trim().replace(/^["']|["']$/g, "").toLowerCase()).filter(Boolean)) if (!chips.includes(t)) chips.push(t);
+      draw(); check();
+    };
+    const flush = () => { const t = inp.value; inp.value = ""; if (t.trim()) take(t); };
+    inp.addEventListener("keydown", (e) => {
+      if (["Enter", ",", " ", ";"].includes(e.key) && inp.value.trim()) { e.preventDefault(); flush(); }
+      else if (e.key === "Backspace" && !inp.value && chips.length) { chips.pop(); draw(); }
+    });
+    inp.addEventListener("paste", (e) => { e.preventDefault(); take(e.clipboardData.getData("text")); });
+    inp.addEventListener("blur", flush);
+    const go = h("button", { class: "primary", type: "button", disabled: true, onclick: act(async () => {
+      flush();
+      const mine = chips.filter((c) => ["ok", "warn"].includes(kind(c)));
+      if (!mine.length) return;
+      if (role.value === "staff" && !confirm("ให้ทุกคนในรายการนี้เป็นเจ้าหน้าที่?\nเจ้าหน้าที่จะเห็นเอกสารของนักวิจัยทุกคนและตรวจอนุมัติได้")) return;
+      const r = await call("add", "POST", { emails: mine.join("\n"), role: role.value });
+      d.close(); toast("เพิ่มแล้ว " + r.added.length + " คน"); reload();
+    }) }, "เพิ่ม");
+    const dot = (c, t) => h("span", {}, h("i", { style: "background:" + c }), t);
+    const d = modal("เพิ่มผู้ใช้", () => d.remove(),
+      h("p", { class: "muted" }, "เฉพาะอีเมลที่เพิ่มไว้ที่นี่เท่านั้นที่เข้าระบบได้ ชื่อจะมาจากบัญชี CMU เมื่อเขาเข้าระบบครั้งแรก"),
+      h("p", { class: "muted" }, "พิมพ์อีเมล CMU แล้วกด Enter หรือวางรายการอีเมลทั้งหมดได้เลย"), wrap,
+      h("div", { class: "legend" }, dot("var(--accent)", "จะถูกเพิ่ม"), dot("var(--err)", "ไม่ถูกต้อง"), dot("var(--muted)", "มีอยู่แล้ว"), dot("var(--warn)", "ไม่ใช่ @cmu.ac.th")),
+      note, h("div", { class: "foot" }, h("label", { class: "muted" }, "บทบาท", role), go));
+    draw();
+    document.body.append(d); d.showModal(); inp.focus();
+  };
+  body.append(h("div", { class: "between" }, h("h1", { class: "page-title" }, "ผู้ใช้"), h("button", { class: "primary", type: "button", onclick: addDialog }, "+ เพิ่มผู้ใช้")),
+    h("p", { class: "muted sub" }, "เฉพาะคนในรายการนี้เท่านั้นที่เข้าระบบได้ บทบาทมีผลในการใช้งานครั้งถัดไปของเขา"), h("section", { class: "card" }, h("div", { class: "filters" }, find), chips, list, note, more));
+  await load(true);
+  users = await api("/users");  // the page-wide name list stays current for the other tabs
+}
 
 async function staffFiles(body) {
   filesRoot ||= document.getElementById("files-root");
@@ -309,7 +407,7 @@ async function staffSubs(body, queue = []) {
   const find = h("input", { type: "search", placeholder: "ค้นหาชื่องาน ประเภท หรือนักวิจัย", "aria-label": "ค้นหา" });
   const status = h("select", { class: "field", "aria-label": "สถานะ" }, [["", "ทุกสถานะ"], ["review", "รอตรวจสอบ"], ["active", "กำลังดำเนินการ"], ["done", "เสร็จสิ้น"]].map(([v, t]) => h("option", { value: v }, t)));
   const who = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบ" }, [h("option", { value: "" }, "ผู้รับผิดชอบทุกคน"), h("option", { value: me.id }, "ของฉัน"),
-    ...users.filter((u) => u.role === "staff" && u.id !== me.id).map((u) => h("option", { value: u.id }, u.name))]);
+    ...users.filter((u) => u.active && u.role === "staff" && u.id !== me.id).map((u) => h("option", { value: u.id }, u.name))]);
   const count = h("p", { class: "muted sub" }), list = h("div");
   const draw = () => {
     const q = find.value.trim().toLowerCase();
@@ -359,7 +457,7 @@ async function staffDetail(sid) {
   const nm = (id) => users.find((u) => u.id === id)?.name || id;
   const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); await staffDetail(sid); });
   const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await api("/submissions/" + sid + "/staff", send("POST", { staff_id: ev.target.value })); staffDetail(sid); }) },
-    users.filter((u) => u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === sub.staff_id }, "ผู้รับผิดชอบ " + u.name)));
+    users.filter((u) => u.active && u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === sub.staff_id }, "ผู้รับผิดชอบ " + u.name)));
   show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ")),
     h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · นักวิจัย " + sub.researcher_ids.map(nm).join(", ")), h("div", { class: "actions" }, owner, h("span", { class: "muted" }, "เปลี่ยนผู้รับผิดชอบได้ทุกคน เมื่อคนเดิมไม่อยู่")), stepper(sub),
       h("div", { class: "actions" },
@@ -552,7 +650,7 @@ async function typePage(body, t) {
 
 // open a type as a post researchers can start from; the owner is staff in charge of every request started from it
 function postControls(t) {
-  const staff = users.filter((u) => u.role === "staff");
+  const staff = users.filter((u) => u.active && u.role === "staff");
   const publish = (owner) => api("/types/" + t.type_id + "/publish", send("POST", owner ? { owner_id: owner } : {}));
   const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await publish(ev.target.value); staffHome(); }) },
     staff.map((u) => h("option", { value: u.id, selected: u.id === t.owner_id }, "ผู้รับผิดชอบ " + u.name)));
@@ -566,7 +664,7 @@ function audienceControls(t) {
   const chosen = new Set(t.audience || []);
   const save = (ids) => api("/types/" + t.type_id + "/audience", send("PUT", { user_ids: ids }));
   const hint = h("p", { class: "muted", hidden: true }, "ยังเห็นได้ทุกคน จนกว่าจะติ๊กอย่างน้อยหนึ่งชื่อ");
-  const picks = h("div", { class: "checks", hidden: !t.audience }, users.filter((u) => u.role === "researcher").map((u) => h("label", { class: "check" },
+  const picks = h("div", { class: "checks", hidden: !t.audience }, users.filter((u) => u.active && u.role === "researcher").map((u) => h("label", { class: "check" },
     h("input", { type: "checkbox", checked: chosen.has(u.id), onchange: act(async (ev) => {
       ev.target.checked ? chosen.add(u.id) : chosen.delete(u.id);
       if (!chosen.size) { ev.target.checked = true; chosen.add(u.id); toast("ต้องเลือกอย่างน้อยหนึ่งคน หรือเลือก “นักวิจัยทุกคน”"); return; }

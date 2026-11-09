@@ -49,7 +49,7 @@ def test_forged_or_tampered_cookie_is_rejected():
 def test_user_list_needs_login_and_never_shows_passwords(env):
     assert TestClient(server.app).get("/api/track/users").status_code == 401
     got = login("r1").get("/api/track/users").json()
-    assert "password" not in str(got) and {"id": "s1", "name": "Malee", "role": "staff"} in got
+    assert "password" not in str(got) and {"id": "s1", "name": "Malee", "role": "staff", "active": True} in got
 
 
 def test_login_sets_cookie_and_me_returns_role(env):

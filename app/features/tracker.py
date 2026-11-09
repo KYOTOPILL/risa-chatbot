@@ -4,7 +4,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from app.core.config import MOCK_USERS
+from app.core.config import MOCK_USERS, STAFF_EMAILS
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS types (id INTEGER PRIMARY KEY, name TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 0, owner_id TEXT NOT NULL DEFAULT '');
@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role 
 CREATE TABLE IF NOT EXISTS line_links (line_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
 ROLES = {"researcher", "staff"}
+USER_VIEWS = {"": "status = 'active'", "staff": "status = 'active' AND role = 'staff'", "researcher": "status = 'active' AND role = 'researcher'", "disabled": "status = 'disabled'"}  # the access list chips
 AVATAR_COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#be123c", "#b45309", "#475569"]  # white text stays readable on each
 UPLOAD_STATUSES = {"draft", "screened", "cannot_check", "sent", "approved", "returned"}
 
@@ -48,6 +49,31 @@ DEFAULT_FORMATS = ["pdf", "docx"]
 
 def allowed_exts(step: dict, doc: str) -> set[str]:
     return set().union(*(FORMAT_EXTS[f] for f in (step.get("formats") or {}).get(doc) or DEFAULT_FORMATS))
+
+
+EMAIL = re.compile(r"[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+")
+
+
+def parse_people(text: str) -> list[dict]:
+    """The paste box of the add-people dialog: one person per line, the email first, then an optional name (separated by a tab, comma, semicolon or
+    space, so a two-column paste from Excel works). Returns {line, email, name, problem} for each non-empty line; problem is a Thai reason or ''."""
+    out, seen = [], set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = re.match(r"([^\s,;]+)[\s,;]*(.*)", line)
+        email, name = m.group(1).strip('"\'').lower(), m.group(2).strip().strip('"\'').strip()[:80]
+        problem = ""
+        if not EMAIL.fullmatch(email):
+            problem = "อีเมลไม่ถูกต้อง"
+        elif "@" in name:
+            problem = "มีหลายอีเมลในบรรทัดเดียว (ใส่บรรทัดละคน)"
+        elif email in seen:
+            problem = "ซ้ำในรายการที่วาง"
+        seen.add(email)
+        out.append({"line": line, "email": email, "name": name, "problem": problem})
+    return out
 
 
 def validate_steps(steps) -> list:
@@ -104,11 +130,12 @@ class Tracker:
                 if col not in have:
                     db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
             have = {r["name"] for r in db.execute("PRAGMA table_info(users)")}
-            for col, ddl in (("phone", "TEXT NOT NULL DEFAULT ''"), ("faculty", "TEXT NOT NULL DEFAULT ''"), ("avatar_color", "TEXT NOT NULL DEFAULT ''"), ("avatar", "BLOB")):  # profile columns, added to old databases
+            for col, ddl in (("phone", "TEXT NOT NULL DEFAULT ''"), ("faculty", "TEXT NOT NULL DEFAULT ''"), ("avatar_color", "TEXT NOT NULL DEFAULT ''"), ("avatar", "BLOB"), ("status", "TEXT NOT NULL DEFAULT 'active'"), ("first_login", "TEXT")):  # profile and access columns, added to old databases
                 if col not in have:
                     db.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
-            # ponytail: demo accounts seeded so the mock login works; drop this line once CMU login creates users (upsert_user)
+            # ponytail: demo accounts seeded so the mock login works; drop this line once the demo accounts are replaced by staff added through the ผู้ใช้ tab
             db.executemany("INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)", [(i, u["name"], u["role"]) for i, u in MOCK_USERS.items()])
+            db.executemany("INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, 'staff')", [(e, e.split("@")[0]) for e in STAFF_EMAILS])  # the first staff, so someone can log in and add the rest
             if "answers" not in {r["name"] for r in db.execute("PRAGMA table_info(uploads)")}:
                 db.execute("ALTER TABLE uploads ADD COLUMN answers TEXT NOT NULL DEFAULT '[]'")
 
@@ -306,22 +333,79 @@ class Tracker:
                 db.execute("UPDATE types SET open = ?, owner_id = ? WHERE id = ?", (int(is_open), owner_id, type_id))
 
     # ---- users: id (a CMU email once real login lands), display name, role. No passwords here. ----
-    def get_user(self, user_id: str) -> dict | None:
+    def get_user(self, user_id: str, active_only: bool = False) -> dict | None:
         with self._db() as db:
-            row = db.execute("SELECT id, name, role FROM users WHERE id = ?", (user_id,)).fetchone()
+            row = db.execute("SELECT id, name, role FROM users WHERE id = ?" + (" AND status = 'active'" if active_only else ""), (user_id,)).fetchone()
         return dict(row) if row else None
 
     def list_users(self) -> list[dict]:
+        """Everyone, with `active` (a disabled person keeps their name on old requests but cannot be picked or log in)."""
         with self._db() as db:
-            return [dict(r) for r in db.execute("SELECT id, name, role FROM users ORDER BY role, name")]
+            return [{"id": r["id"], "name": r["name"], "role": r["role"], "active": r["status"] == "active"} for r in db.execute("SELECT id, name, role, status FROM users ORDER BY role, name")]
 
-    def upsert_user(self, user_id: str, name: str, role: str = "researcher") -> None:
-        """Call on every login: a new person is added with `role` and the name the login gave. A known one is left alone: they may have edited
-        their name on the profile page, and staff decide roles."""
+    # ---- access: only people staff added can log in (no self sign-up) ----
+    def preview_people(self, text: str) -> list[dict]:
+        """parse_people plus what adding would do to each line: status new / exists / disabled / invalid, and `warn` for an email outside cmu.ac.th
+        (it can never log in through CMU, but it is allowed)."""
+        rows = parse_people(text)
+        with self._db() as db:
+            known = {r["id"]: r["status"] for r in db.execute("SELECT id, status FROM users")}
+        for r in rows:
+            e = r["email"]
+            r["status"] = "invalid" if r["problem"] else "disabled" if known.get(e) == "disabled" else "exists" if e in known else "new"
+            r["warn"] = r["status"] == "new" and not (e.endswith("@cmu.ac.th") or e.endswith(".cmu.ac.th"))
+        return rows
+
+    def add_people(self, text: str, role: str) -> dict:
+        """Staff add people before they ever log in. Returns {added, existing, invalid}; an existing person (even a disabled one) is left as they are."""
         if role not in ROLES:
             raise ValueError("unknown role")
+        out = {"added": [], "existing": [], "invalid": []}
         with self._db() as db:
-            db.execute("INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)", (user_id, name, role))
+            for r in self.preview_people(text):
+                if r["status"] == "invalid":
+                    out["invalid"].append(r["line"])
+                elif r["status"] == "new":
+                    db.execute("INSERT INTO users (id, name, role) VALUES (?, ?, ?)", (r["email"], r["name"] or r["email"].split("@")[0], role))
+                    out["added"].append(r["email"])
+                else:
+                    out["existing"].append(r["email"])
+        return out
+
+    def add_users(self, emails: list[str], role: str) -> dict:
+        return self.add_people("\n".join(emails), role)
+
+    def login_user(self, email: str, name: str) -> dict | None:
+        """The CMU login callback: the person if staff added them and they are not disabled, else None (never creates anyone).
+        The first login replaces the placeholder name with the one CMU gives; later logins keep any name they edited."""
+        uid = email.strip().lower()
+        with self._db() as db:
+            if not db.execute("SELECT 1 FROM users WHERE id = ? AND status = 'active'", (uid,)).fetchone():
+                return None
+            if name.strip():
+                db.execute("UPDATE users SET name = ?, first_login = CURRENT_TIMESTAMP WHERE id = ? AND first_login IS NULL", (name.strip()[:80], uid))
+            else:
+                db.execute("UPDATE users SET first_login = CURRENT_TIMESTAMP WHERE id = ? AND first_login IS NULL", (uid,))
+        return self.get_user(uid)
+
+    def set_active(self, user_id: str, active: bool) -> None:
+        """Disable or re-enable a person. Disabling also cuts their LINE links (the alert and chat paths then ignore them)."""
+        with self._db() as db:
+            if not db.execute("UPDATE users SET status = ? WHERE id = ?", ("active" if active else "disabled", user_id)).rowcount:
+                raise KeyError(user_id)
+            if not active:
+                db.execute("DELETE FROM line_links WHERE user_id = ?", (user_id,))
+
+    def page_users(self, q: str = "", view: str = "", offset: int = 0, limit: int = 50) -> dict:
+        """One page of the access list. view: '' everyone active, 'staff', 'researcher', 'disabled'. counts ignore the search text."""
+        like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self._db() as db:
+            where = f"{USER_VIEWS[view]} AND (name LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\')"
+            total = db.execute(f"SELECT COUNT(*) FROM users WHERE {where}", (like, like)).fetchone()[0]
+            rows = db.execute(f"SELECT id, name, role, status, first_login IS NOT NULL AS joined FROM users WHERE {where} ORDER BY (role = 'staff') DESC, name COLLATE NOCASE, id LIMIT ? OFFSET ?", (like, like, limit, offset))
+            items = [{"id": r["id"], "name": r["name"], "role": r["role"], "active": r["status"] == "active", "joined": bool(r["joined"])} for r in rows]
+            counts = {k: db.execute(f"SELECT COUNT(*) FROM users WHERE {c}").fetchone()[0] for k, c in USER_VIEWS.items()}
+        return {"items": items, "total": total, "counts": counts}
 
     # ---- profile: what the person edits about themselves (never id or role) ----
     def get_profile(self, user_id: str) -> dict | None:
@@ -386,7 +470,8 @@ class Tracker:
             return db.execute("SELECT 1 FROM line_links WHERE user_id = ?", (user_id,)).fetchone() is not None
 
     def role_of(self, user_id: str) -> str | None:
-        u = self.get_user(user_id)
+        """The role of an active person; a disabled or unknown id is None, so nobody can be assigned or addressed as them."""
+        u = self.get_user(user_id, active_only=True)
         return u["role"] if u else None
 
     def name_of(self, user_id: str) -> str:

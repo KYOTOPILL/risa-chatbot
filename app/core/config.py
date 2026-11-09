@@ -39,10 +39,16 @@ MOCK_USERS = {
 for _uid, _u in MOCK_USERS.items():  # RISA_PASSWORD_S1=... replaces a demo password; set all four before anyone else can reach the app
     _u["password"] = os.environ.get(f"RISA_PASSWORD_{_uid.upper()}") or _u["password"]
 SESSION_TTL = 8 * 3600  # seconds a login lasts
+# Dev only: RISA_DEV_LOGIN=you@cmu.ac.th:password lets that one email log in with that password until real CMU login exists. The person must still be
+# on the access list. Unset = off. Never set it on a server other people can reach.
+_dev = os.environ.get("RISA_DEV_LOGIN", "").strip()
+DEV_LOGIN = (_dev.split(":", 1)[0].strip().lower(), _dev.split(":", 1)[1]) if ":" in _dev else None
 COOKIE_SECURE = os.environ.get("RISA_COOKIE_SECURE") == "1"  # set to 1 when served over HTTPS
 MAX_PER_MIN = int(os.environ.get("RISA_MAX_PER_MIN", "20"))  # chat questions one user may start per minute; 0 = off
 SESSION_SECRET = os.environ.get("RISA_SESSION_SECRET") or secrets.token_hex(32)  # unset: logins end when the server restarts
 # LINE Official Account chatbot (Messaging API). Unset secret = the webhook is off.
+# comma-separated CMU emails that become staff the first time they log in (everyone else starts as a researcher)
+STAFF_EMAILS = {e.strip().lower() for e in os.environ.get("RISA_STAFF_EMAILS", "").split(",") if e.strip()}
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 PUBLIC_URL = os.environ.get("RISA_PUBLIC_URL", "").rstrip("/")  # https address of this server: file links sent through LINE start with it

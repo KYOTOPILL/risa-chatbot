@@ -470,3 +470,38 @@ a.ghost { text-decoration: none; display: inline-block; }
 .pfield { display: grid; gap: 4px; font-size: .9rem; color: var(--muted); }
 .pfield input { font: inherit; font-size: 1rem; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; width: 100%; }
 .pfield b { color: var(--text); font-weight: 500; word-break: break-all; }
+
+/* users tab */
+.ulist { display: grid; margin-top: 8px; }
+.urow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.urow:first-child { border-top: 0; }
+.urow small { display: block; word-break: break-all; }
+.urow .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.urow.off { opacity: .6; }
+.uact { display: flex; align-items: center; gap: 10px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.uact select.field { width: auto; min-width: 120px; }
+.pill.wait { margin-left: 8px; font-size: .7rem; font-weight: 600; padding: 1px 8px; border-radius: 9999px; background: var(--warn-bg); color: var(--warn); }
+.chips2 { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+.chips2 .chip2 { font: inherit; font-size: .85rem; padding: 5px 14px; border-radius: 9999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; }
+.chips2 .chip2[aria-pressed=true] { border-color: var(--accent); background: var(--tint); color: var(--accent); font-weight: 600; }
+.more { display: block; margin: 12px auto 0; }
+.dlg textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); resize: vertical; }
+@media (max-width: 560px) { .urow { flex-wrap: wrap; } }
+.field-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; align-content: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-height: 92px; cursor: text; }
+.field-chips:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.field-chips input { flex: 1 1 160px; min-width: 120px; border: 0; outline: 0; background: none; font: inherit; color: var(--text); padding: 5px 4px; }
+.chip3 { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 9999px; font-size: .85rem; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--tint); color: var(--text); max-width: 100%; }
+.chip3 > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip3 button { all: unset; cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); font-size: .8rem; flex: none; }
+.chip3 button:hover { background: color-mix(in srgb, var(--text) 12%, transparent); color: var(--text); }
+.chip3 button:focus-visible { outline: 2px solid var(--accent); }
+.chip3.bad { border-color: var(--err); background: var(--err-bg); color: var(--err); }
+.chip3.have { border-color: var(--line); background: var(--bg); color: var(--muted); text-decoration: line-through; }
+.chip3.warn { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .8rem; color: var(--muted); margin: 8px 0 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.note3 { font-size: .85rem; margin: 8px 0 0; min-height: 1.3em; color: var(--muted); }
+.note3 .e { color: var(--err); } .note3 .w { color: var(--warn); }
+.foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.foot label { display: flex; align-items: center; gap: 8px; }
+.foot .primary { margin-left: auto; }

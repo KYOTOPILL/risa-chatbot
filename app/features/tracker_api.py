@@ -17,7 +17,8 @@ from app.rag.extract import extract_pages, extract_text
 from app.rag.rag import chat as llm
 from app.features.forms_ai import draft_form
 from app.features.steps_ai import draft_steps, screen_document
-from app.features.tracker import allowed_exts
+from app.features import line_bot
+from app.features.tracker import ROLES, USER_VIEWS, allowed_exts
 
 router = APIRouter(prefix="/api/track")
 
@@ -54,6 +55,87 @@ def users(_user: User = Depends(current_user)):
     return state.get_tracker().list_users()
 
 
+class RoleIn(BaseModel):
+    role: str
+
+
+def _unfinished(tk, staff_id: str) -> int:
+    """Requests this staff member is in charge of that are not finished."""
+    return sum(1 for s in tk.list_submissions(staff_id, "staff") if s["staff_id"] == staff_id and s["current_step"] < s["step_count"])
+
+
+class AddUsersIn(BaseModel):
+    emails: str  # the pasted text: one person per line, email first, optional name after it
+    role: str = "researcher"
+
+
+def _people_text(text: str) -> str:
+    if not text.strip() or len(text.splitlines()) > 2000:
+        raise HTTPException(400, "ใส่อีเมลอย่างน้อย 1 รายการ และไม่เกิน 2,000 บรรทัดต่อครั้ง")
+    return text
+
+
+@router.get("/users/page")
+def users_page(q: str = "", view: str = "", offset: int = 0, limit: int = 50, _user: User = Depends(require_staff)):
+    """The access list, one page at a time (it can hold thousands of people)."""
+    if view not in USER_VIEWS:
+        raise HTTPException(400, "unknown view")
+    return state.get_tracker().page_users(q, view, max(offset, 0), min(max(limit, 1), 100))
+
+
+@router.post("/users/preview")
+def preview_users(body: AddUsersIn, _user: User = Depends(require_staff)):
+    """What pasting this text would do, line by line, without saving anything."""
+    rows = state.get_tracker().preview_people(_people_text(body.emails))
+    return {"rows": rows, "total": len(rows), "counts": {k: sum(1 for r in rows if r["status"] == k) for k in ("new", "exists", "disabled", "invalid")}, "warn": sum(r["warn"] for r in rows)}
+
+
+@router.post("/users/add")
+def add_users(body: AddUsersIn, _user: User = Depends(require_staff)):
+    """Give people access before they log in: only emails added here can log in. Existing people are left as they are."""
+    try:
+        return state.get_tracker().add_people(_people_text(body.emails), body.role)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class ActiveIn(BaseModel):
+    active: bool
+
+
+@router.put("/users/{uid}/active")
+def set_user_active(uid: str, body: ActiveIn, user: User = Depends(require_staff)):
+    """Turn a person's access off (they cannot log in, their LINE link is cut, their history stays) or back on. Not yourself."""
+    tk = state.get_tracker()
+    if uid == user.id:
+        raise HTTPException(400, "ปิดใช้งานตัวเองไม่ได้ ให้เจ้าหน้าที่คนอื่นทำให้")
+    if tk.get_user(uid) is None:
+        raise HTTPException(404, "not found")
+    if not body.active and (n := _unfinished(tk, uid)):
+        raise HTTPException(409, f"ยังเป็นผู้รับผิดชอบงานที่ยังไม่เสร็จ {n} รายการ กรุณาเปลี่ยนผู้รับผิดชอบก่อน")
+    if not body.active:
+        for line_id in tk.lines_for([uid]):
+            line_bot._history.pop(line_id, None)
+    tk.set_active(uid, body.active)
+    return {"ok": True}
+
+
+@router.put("/users/{uid}/role")
+def set_user_role(uid: str, body: RoleIn, user: User = Depends(require_staff)):
+    """Staff make someone staff or researcher. Nobody changes their own role, which also means the last staff member can never remove themselves."""
+    tk = state.get_tracker()
+    if uid == user.id:
+        raise HTTPException(400, "เปลี่ยนบทบาทของตัวเองไม่ได้ ให้เจ้าหน้าที่คนอื่นเปลี่ยนให้")
+    if body.role not in ROLES:
+        raise HTTPException(400, "unknown role")
+    if tk.get_user(uid) is None:
+        raise HTTPException(404, "not found")
+    if body.role == "researcher" and (n := _unfinished(tk, uid)):  # a researcher cannot be the staff in charge: hand those requests over first
+        raise HTTPException(409, f"ยังเป็นผู้รับผิดชอบงานที่ยังไม่เสร็จ {n} รายการ กรุณาเปลี่ยนผู้รับผิดชอบก่อน")
+    tk.set_role(uid, body.role)
+    return tk.list_users()
+
+
 def _role(uid: str) -> str | None:
     return state.get_tracker().role_of(uid)
 
@@ -67,8 +149,11 @@ def login(body: LoginIn, request: Request, response: Response):
     if uid is None:
         login_failed(key)
         raise HTTPException(401, "wrong username or password")
+    user = state.get_tracker().get_user(uid, active_only=True)
+    if user is None:
+        raise HTTPException(403, "บัญชีนี้ถูกปิดใช้งาน")
     response.set_cookie("uid", session_value(uid), httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_TTL)
-    return state.get_tracker().get_user(uid)
+    return user
 
 
 @router.post("/logout")

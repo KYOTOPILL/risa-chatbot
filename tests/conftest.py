@@ -14,3 +14,13 @@ def mock_content(tmp_path_factory):
     root = tmp_path_factory.mktemp("mock_content")
     main(root)
     return root
+
+
+@pytest.fixture(autouse=True)
+def _own_tracker_db(tmp_path, monkeypatch):
+    """No test reads or writes the real tracker.db: it holds whatever was clicked in the UI (roles, demo people). A test that builds its own Tracker overrides this."""
+    from app.core import state
+    from app.features.tracker import Tracker
+
+    tk = Tracker(tmp_path / "default-tracker.db")
+    monkeypatch.setattr(state, "get_tracker", lambda: tk)
