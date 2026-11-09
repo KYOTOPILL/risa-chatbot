@@ -162,6 +162,9 @@ input[type=text], textarea, select.field { font: inherit; padding: 8px 12px; bor
 .empty p { margin: 2px 0 0; }
 .me { display: flex; align-items: center; gap: 10px; font-size: .92rem; }
 .me small { display: block; color: var(--muted); font-size: .75rem; line-height: 1.2; }
+a.me { text-decoration: none; color: inherit; border-radius: 8px; padding: 2px 6px; margin: -2px -6px; }
+a.me:hover { background: var(--tint); }
+img.av { display: block; object-fit: cover; }
 .av { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 700; font-size: .8rem; flex: none; }
 .lnk { background: none; border: 0; font: inherit; font-size: .92rem; color: var(--muted); cursor: pointer; padding: 6px 4px; text-decoration: none; }
 .lnk:hover { color: var(--text); }
@@ -436,3 +439,34 @@ button[aria-busy=true] { cursor: progress; }
 .checks .check:has(input:checked) { border-color: var(--accent); background: var(--tint); }
 #app > .formbar:first-child { margin-top: 16px; }  /* a page that opens with a back button: room under the header line */
 .linecode { font-size: 2.4rem; font-weight: 700; letter-spacing: .3em; text-align: center; margin: 8px 0; color: var(--accent); user-select: all; }
+/* step editor: one row per document, a pill for the accepted file formats */
+.docrow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.docrow input[type=text] { flex: 1; min-width: 0; }
+.docdel { background: none; border: 0; color: var(--err); cursor: pointer; font-size: .9rem; padding: 6px 8px; }
+.addrow2 { margin-top: 10px; }
+.fpill { position: relative; flex: none; }
+.fpill > summary { list-style: none; cursor: pointer; font-size: .85rem; padding: 6px 12px; border: 1px solid var(--line); border-radius: 9999px; background: var(--panel); color: var(--muted); white-space: nowrap; }
+.fpill > summary::-webkit-details-marker { display: none; }
+.fpill > summary::after { content: " ▾"; }
+.fpill.custom > summary { border-color: var(--accent); color: var(--accent); background: var(--tint); font-weight: 600; }
+.fpill[open] > summary { border-color: var(--accent); }
+.fpop { position: absolute; right: 0; top: 40px; z-index: 5; min-width: 190px; padding: 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.08); display: grid; gap: 4px; }
+.fpop label { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px; cursor: pointer; }
+.fpop label:hover { background: var(--tint); }
+.fpop small { color: var(--muted); padding: 4px 6px 0; border-top: 1px solid var(--line); margin-top: 4px; }
+@media (max-width: 480px) { .docrow { flex-wrap: wrap; } .docrow input[type=text] { flex-basis: 100%; } }
+
+/* profile page */
+a.ghost { text-decoration: none; display: inline-block; }
+.profile, .profile ~ .card { max-width: 560px; }
+.profile { display: grid; gap: 16px; }
+.avhead { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.avbig .av { width: 88px; height: 88px; border-radius: 22px; font-size: 2rem; }
+.avside { display: grid; gap: 10px; }
+.avside .actions { margin: 0; }
+.swatches { display: flex; gap: 8px; }
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0; }
+.swatch[aria-pressed=true] { box-shadow: 0 0 0 2px var(--text); }
+.pfield { display: grid; gap: 4px; font-size: .9rem; color: var(--muted); }
+.pfield input { font: inherit; font-size: 1rem; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; width: 100%; }
+.pfield b { color: var(--text); font-weight: 500; word-break: break-all; }

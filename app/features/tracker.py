@@ -1,5 +1,6 @@
 """Submission tracking store (SQLite): submission types with versioned step lists. All rules live here, no web or LLM code."""
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -36,7 +37,17 @@ CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role 
 CREATE TABLE IF NOT EXISTS line_links (line_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
 ROLES = {"researcher", "staff"}
+AVATAR_COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#be123c", "#b45309", "#475569"]  # white text stays readable on each
 UPLOAD_STATUSES = {"draft", "screened", "cannot_check", "sent", "approved", "returned"}
+
+
+# file formats staff may allow per document: key -> extensions. A step's optional "formats" maps a document name to a list of keys; absent = pdf and docx.
+FORMAT_EXTS = {"pdf": {".pdf"}, "docx": {".docx"}, "xlsx": {".xlsx"}, "pptx": {".pptx"}, "image": {".jpg", ".jpeg", ".png"}}
+DEFAULT_FORMATS = ["pdf", "docx"]
+
+
+def allowed_exts(step: dict, doc: str) -> set[str]:
+    return set().union(*(FORMAT_EXTS[f] for f in (step.get("formats") or {}).get(doc) or DEFAULT_FORMATS))
 
 
 def validate_steps(steps) -> list:
@@ -47,6 +58,9 @@ def validate_steps(steps) -> list:
         if (not isinstance(s, dict) or not isinstance(s.get("title"), str) or not s["title"].strip()
                 or not isinstance(s.get("documents"), list) or not all(isinstance(d, str) and d.strip() for d in s["documents"])):
             raise ValueError("each step needs a title and a documents list")
+        f = s.get("formats")
+        if f is not None and (not isinstance(f, dict) or any(d not in s["documents"] or not isinstance(v, list) or not v or any(x not in FORMAT_EXTS for x in v) for d, v in f.items())):
+            raise ValueError("formats must list pdf, docx, xlsx, pptx or image for documents of the step")
     return steps
 
 
@@ -89,6 +103,10 @@ class Tracker:
             for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''"), ("category_id", "INTEGER"), ("pinned", "INTEGER NOT NULL DEFAULT 0"), ("audience", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
                 if col not in have:
                     db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
+            have = {r["name"] for r in db.execute("PRAGMA table_info(users)")}
+            for col, ddl in (("phone", "TEXT NOT NULL DEFAULT ''"), ("faculty", "TEXT NOT NULL DEFAULT ''"), ("avatar_color", "TEXT NOT NULL DEFAULT ''"), ("avatar", "BLOB")):  # profile columns, added to old databases
+                if col not in have:
+                    db.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
             # ponytail: demo accounts seeded so the mock login works; drop this line once CMU login creates users (upsert_user)
             db.executemany("INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)", [(i, u["name"], u["role"]) for i, u in MOCK_USERS.items()])
             if "answers" not in {r["name"] for r in db.execute("PRAGMA table_info(uploads)")}:
@@ -298,11 +316,41 @@ class Tracker:
             return [dict(r) for r in db.execute("SELECT id, name, role FROM users ORDER BY role, name")]
 
     def upsert_user(self, user_id: str, name: str, role: str = "researcher") -> None:
-        """Call on every login: a new person is added with `role`; a known one only gets their name refreshed (staff decide roles)."""
+        """Call on every login: a new person is added with `role` and the name the login gave. A known one is left alone: they may have edited
+        their name on the profile page, and staff decide roles."""
         if role not in ROLES:
             raise ValueError("unknown role")
         with self._db() as db:
-            db.execute("INSERT INTO users (id, name, role) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name", (user_id, name, role))
+            db.execute("INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)", (user_id, name, role))
+
+    # ---- profile: what the person edits about themselves (never id or role) ----
+    def get_profile(self, user_id: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT id, name, role, phone, faculty, avatar_color, avatar IS NOT NULL AS photo FROM users WHERE id = ?", (user_id,)).fetchone()
+        return {**dict(row), "photo": bool(row["photo"])} if row else None
+
+    def set_profile(self, user_id: str, name: str, phone: str, faculty: str, avatar_color: str) -> None:
+        name, phone, faculty = name.strip(), phone.strip(), faculty.strip()
+        if not name or len(name) > 80:
+            raise ValueError("กรุณากรอกชื่อ (ไม่เกิน 80 ตัวอักษร)")
+        if len(phone) > 20 or not re.fullmatch(r"[0-9+()\- .]*", phone):
+            raise ValueError("เบอร์โทรไม่ถูกต้อง")
+        if len(faculty) > 100:
+            raise ValueError("คณะ/หน่วยงานยาวเกินไป (ไม่เกิน 100 ตัวอักษร)")
+        if avatar_color and avatar_color not in AVATAR_COLORS:
+            raise ValueError("สีไม่ถูกต้อง")
+        with self._db() as db:
+            if not db.execute("UPDATE users SET name = ?, phone = ?, faculty = ?, avatar_color = ? WHERE id = ?", (name, phone, faculty, avatar_color, user_id)).rowcount:
+                raise KeyError(user_id)
+
+    def set_avatar(self, user_id: str, data: bytes | None) -> None:
+        with self._db() as db:
+            db.execute("UPDATE users SET avatar = ? WHERE id = ?", (data, user_id))
+
+    def avatar_of(self, user_id: str) -> bytes | None:
+        with self._db() as db:
+            row = db.execute("SELECT avatar FROM users WHERE id = ?", (user_id,)).fetchone()
+        return row["avatar"] if row else None
 
     def set_role(self, user_id: str, role: str) -> None:
         if role not in ROLES:
@@ -324,6 +372,10 @@ class Tracker:
     def unlink_line(self, line_id: str) -> None:
         with self._db() as db:
             db.execute("DELETE FROM line_links WHERE line_id = ?", (line_id,))
+
+    def unlink_user(self, user_id: str) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM line_links WHERE user_id = ?", (user_id,))
 
     def lines_for(self, user_ids: list[str]) -> list[str]:
         with self._db() as db:

@@ -53,7 +53,7 @@ def test_user_list_needs_login_and_never_shows_passwords(env):
 
 
 def test_login_sets_cookie_and_me_returns_role(env):
-    assert login("s1").get("/api/track/me").json() == {"id": "s1", "name": "Malee", "role": "staff"}
+    assert login("s1").get("/api/track/me").json() == {"id": "s1", "name": "Malee", "role": "staff", "avatar_color": "", "photo": False}
 
 
 def test_anonymous_requests_401(env):
@@ -412,3 +412,50 @@ def test_blank_type_name_falls_back_to_a_clean_file_name(ai, monkeypatch):
     monkeypatch.setattr(tracker_api, "llm", llm)
     r = login("s1").post("/api/track/types", data={"name": ""}, files={"file": ("แบบรายงาน_สถานะ (ลงนามแล้ว).pdf", pdf_bytes(), "application/pdf")})
     assert r.status_code == 200 and r.json()["name"] == "แบบรายงาน สถานะ"
+
+
+def test_a_type_can_be_made_by_hand_without_a_file(tmp_path, monkeypatch):
+    tk = Tracker(tmp_path / "t.db")
+    monkeypatch.setattr(state, "get_tracker", lambda: tk)
+    s = login("s1")
+    assert s.post("/api/track/types", data={"name": ""}).status_code == 400  # no file and no name
+    out = s.post("/api/track/types", data={"name": "ขอลา"})
+    assert out.status_code == 200
+    vid = out.json()["version_id"]
+    assert tk.get_version(vid)["status"] == "draft" and tk.get_version(vid)["type_name"] == "ขอลา" and tk.get_version(vid)["steps"][0]["documents"] == []
+    assert s.put(f"/api/track/versions/{vid}", json={"steps": [{"title": "ยื่นใบลา", "documents": ["ใบลา"]}]}).status_code == 200
+    assert s.post(f"/api/track/versions/{vid}/redraft").status_code == 400  # nothing for the AI to read
+    assert s.delete(f"/api/track/versions/{vid}").status_code == 200  # no file to remove, and no crash on the empty path
+
+
+def _with_formats(tk, formats):
+    steps = [{"title": "Submit", "documents": ["Form A", "Form B"], "page": None, "unsure": False, "formats": formats}, DOC_STEPS[1]]
+    v = tk.create_type("Fmt", steps, "f.pdf")
+    tk.approve(v)
+    return tk.create_submission("S2", v, ["r1"], "s1")
+
+
+def test_a_document_accepts_only_the_formats_staff_chose(up):
+    tk, _, _ = up
+    sid = _with_formats(tk, {"Form A": ["pdf"], "Form B": ["xlsx", "image"]})
+    r = login("r1")
+    assert put(r, sid, "Form A", name="a.docx", data=b"x").status_code == 400  # Word not allowed here
+    assert put(r, sid, "Form A", name="a.pdf").status_code == 200
+    assert put(r, sid, "Form B", name="b.pdf").status_code == 400
+    assert put(r, sid, "Form B", name="photo.JPG", data=b"\xff\xd8\xff").json()["status"] == "cannot_check"  # accepted, but the AI cannot read an image
+
+
+def test_without_a_setting_pdf_and_word_are_accepted_as_before(up):
+    _, sid, _ = up
+    r = login("r1")
+    assert put(r, sid, name="a.docx", data=b"x").status_code in (200,)  # unreadable bytes only mean cannot_check
+    assert put(r, sid, name="a.xlsx", data=b"x").status_code == 400
+
+
+def test_bad_format_settings_are_refused(up):
+    tk, _, _ = up
+    s = login("s1")
+    v = tk.create_type("Bad", [{"title": "S", "documents": ["Doc"]}], "")
+    ok = lambda f: s.put(f"/api/track/versions/{v}", json={"steps": [{"title": "S", "documents": ["Doc"], "formats": f}]}).status_code
+    assert ok({"Doc": ["pdf", "image"]}) == 200
+    assert ok({"Doc": []}) == 400 and ok({"Doc": ["exe"]}) == 400 and ok({"Other": ["pdf"]}) == 400 and ok(["pdf"]) == 400

@@ -79,6 +79,13 @@ const send = (method, body) => ({ method, headers: { "content-type": "applicatio
 const form = (fields) => { const f = new FormData(); for (const [k, v] of Object.entries(fields)) f.append(k, v); return { method: "POST", body: f }; };
 
 const STATUS = { draft: "แบบร่าง (ยังไม่ได้ส่ง)", screened: "AI ตรวจสอบแล้ว", cannot_check: "AI ตรวจสอบไม่ได้ (ยังส่งได้)", sent: "รอเจ้าหน้าที่ตรวจสอบ", approved: "อนุมัติแล้ว", returned: "ส่งกลับให้แก้ไข" };
+// file formats a document may accept (set per document by staff in the step editor); none set = PDF and Word
+const FORMATS = [["pdf", "PDF"], ["docx", "Word"], ["xlsx", "Excel"], ["pptx", "PowerPoint"], ["image", "รูปภาพ"]];
+const DEFAULT_FMTS = ["pdf", "docx"];
+const isDefaultFmts = (f) => f.length === 2 && f.includes("pdf") && f.includes("docx");
+const fmtOf = (step, doc) => step?.formats?.[doc]?.length ? step.formats[doc] : DEFAULT_FMTS;
+const fmtAccept = (fmts) => fmts.flatMap((f) => f === "image" ? [".jpg", ".jpeg", ".png"] : ["." + f]).join(",");
+const fmtLabel = (fmts) => fmts.map((f) => FORMATS.find((x) => x[0] === f)[1]).join(" / ");
 const KIND = { missing: "ขาดหายไป", incorrect: "อาจไม่ถูกต้อง", unclear: "ไม่ชัดเจน" };
 const ROLE = { researcher: "นักวิจัย", staff: "เจ้าหน้าที่" };
 
@@ -142,7 +149,8 @@ function docRow(sub, name, reload) {
   const up = sub.uploads.find((u) => u.doc_name === name), def = sub.forms[name];
   const canSend = up && (up.status === "screened" || up.status === "cannot_check");
   const locked = up && (up.status === "sent" || up.status === "approved");
-  const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
+  const fmts = fmtOf(sub.steps[sub.current_step], name);
+  const pick = h("input", { type: "file", accept: fmtAccept(fmts), hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
     runProgress(ev.target, "กำลังตรวจสอบ “" + name + "”", (say) => apiStream("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }), say), reload, reload);
@@ -155,7 +163,7 @@ function docRow(sub, name, reload) {
       : up && up.note && !locked ? h("p", { class: "err" }, "หมายเหตุจากเจ้าหน้าที่ที่ส่งกลับ: " + up.note) : null,
     def ? (locked ? answersView(up) : formFill(sub, name, def, up, reload)) : null,
     def ? h("div", { class: "actions end" }, sendBtn)
-      : h("div", { class: "actions" }, pick, h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (.pdf / .docx)"), sendBtn));
+      : h("div", { class: "actions" }, pick, h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (" + fmtLabel(fmts) + ")"), sendBtn));
 }
 
 const cancelRequest = (sub, after) => h("button", { class: "ghost danger", type: "button", onclick: act(async () => {
@@ -401,7 +409,7 @@ async function staffTypes(body) {
   const types = await api("/types");
   const open = openType && types.find((t) => t.type_id === openType);
   if (open) return typePage(body, open);
-  const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน (เว้นว่างไว้ให้ AI ตั้งชื่อจากเอกสาร) เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง" });
+  const name = h("input", { type: "text", placeholder: "ชื่อประเภทงาน เช่น ทุน CMU Presidential, ขอเบิกค่าเดินทาง", "aria-label": "ชื่อประเภทงาน" });
   const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
     if (!file) return;
@@ -470,8 +478,15 @@ async function staffTypes(body) {
     list.replaceChildren(shown.length ? h("section", { class: "card" }, head, shown.map(row)) : h("p", { class: "muted pad" }, types.length ? "ไม่พบประเภทงานที่ตรงกัน" : "ยังไม่มีประเภทงาน กด “+ สร้างประเภทงานใหม่” เพื่อเริ่ม"));
   };
   find.addEventListener("input", draw);
-  const create = modal("สร้างประเภทงานใหม่", null, h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI ช่วยร่างขั้นตอนและเอกสารที่ต้องส่ง เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งาน"), name,
-    h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารเพื่อให้ AI ร่างขั้นตอน")));
+  const create = modal("สร้างประเภทงานใหม่", null, h("p", { class: "muted" }, "ตั้งชื่อแล้วกรอกขั้นตอนและเอกสารเอง หรืออัปโหลดคู่มือ (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) ให้ AI ช่วยร่างให้ก็ได้ เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งานเสมอ"), name,
+    h("div", { class: "actions" }, pick,
+      h("button", { class: "primary", type: "button", onclick: act(async () => {
+        if (!name.value.trim()) { name.focus(); toast("กรุณาตั้งชื่อประเภทงาน"); return; }
+        const out = await api("/types", form({ name: name.value.trim() }));
+        create.close();
+        await draftEditor(out.version_id);
+      }) }, "สร้างและกรอกเอง"),
+      h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารให้ AI ร่างขั้นตอน (ไม่บังคับ)")));
   body.append(h("div", { class: "between head-row" }, h("div", {}, h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "จัดการขั้นตอน เอกสาร แบบฟอร์ม และสถานะการเปิดรับงานได้ในที่เดียว")),
       h("button", { class: "primary", type: "button", onclick: () => create.showModal() }, "+ สร้างประเภทงานใหม่")),
     find, chipBox, list, create);
@@ -575,26 +590,51 @@ function newVersionButton(t) {
 
 async function draftEditor(vid, back = staffHome) {
   const v = (await api("/types")).find((t) => t.id === vid);
-  let steps = v.steps.map((s) => ({ ...s }));
+  // each document is a row (name + formats pill); rows become documents and formats again on save
+  let steps = v.steps.map((s) => ({ ...s, rows: s.documents.map((d) => ({ name: d, fmts: s.formats?.[d] || null })) }));
   const live = v.status === "approved", box = h("div");
+  const docRow = (r, remove, add) => {
+    const sum = h("summary", {}), pill = h("details", { class: "fpill" });
+    const sync = () => { const f = r.fmts || DEFAULT_FMTS; sum.textContent = f.map((k) => FORMATS.find((x) => x[0] === k)[1]).join(", "); pill.classList.toggle("custom", !isDefaultFmts(f)); };
+    pill.append(sum, h("div", { class: "fpop" }, FORMATS.map(([k, label]) => h("label", {}, h("input", { type: "checkbox", checked: (r.fmts || DEFAULT_FMTS).includes(k), onchange: (e) => {
+      const cur = new Set(r.fmts || DEFAULT_FMTS);
+      e.target.checked ? cur.add(k) : cur.delete(k);
+      if (!cur.size) { e.target.checked = true; toast("ต้องเลือกอย่างน้อยหนึ่งชนิด"); return; }
+      r.fmts = FORMATS.map((f) => f[0]).filter((f) => cur.has(f));
+      sync();
+    } }), " " + label)), h("small", {}, "ชนิดไฟล์ที่รับ")));
+    sync();
+    const row = h("div", { class: "docrow" }, h("input", { type: "text", value: r.name, placeholder: "ชื่อเอกสาร", "aria-label": "ชื่อเอกสาร",
+      oninput: (e) => { r.name = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); add(); } } }),
+      pill, h("button", { class: "docdel", type: "button", "aria-label": "ลบเอกสาร", onclick: () => remove(row) }, "✕"));
+    return row;
+  };
   const draw = () => box.replaceChildren(...steps.map((s, i) => {
     const title = h("input", { type: "text", value: s.title, oninput: (e) => { s.title = e.target.value; } });
-    const docs = h("textarea", { rows: 2, oninput: (e) => { s.documents = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); } }, s.documents.join("\n"));
+    const list = h("div", { class: "doclist" });
+    const add = () => { const r = { name: "", fmts: null }; s.rows.push(r); const el = docRow(r, remove, add); list.append(el); el.firstChild.focus(); };
+    const remove = (el) => { s.rows.splice([...list.children].indexOf(el), 1); el.remove(); };
+    list.append(...s.rows.map((r) => docRow(r, remove, add)));
     return h("div", { class: "stepedit" + (s.unsure ? " unsure" : "") },
       h("div", { class: "between" }, h("span", {}, h("b", {}, "ขั้นที่ " + (i + 1)), s.unsure ? h("span", { class: "warn" }, "AI ไม่แน่ใจ ตรวจสอบก่อนอนุมัติ") : null,
         s.page && !live ? h("span", { class: "muted" }, " มาจากหน้า " + s.page + " ของเอกสาร") : null),
         h("button", { class: "lk danger", type: "button", onclick: () => { steps.splice(i, 1); draw(); } }, "ลบ")),
       h("label", {}, h("span", { class: "muted" }, "ชื่อขั้นตอน"), title),
-      h("label", {}, h("span", { class: "muted" }, "เอกสารที่ต้องส่ง (บรรทัดละหนึ่งรายการ ไม่มีเอกสารให้เว้นว่าง)"), docs));
+      h("div", {}, h("span", { class: "muted" }, "เอกสารที่ต้องส่ง (ไม่มีเอกสารไม่ต้องเพิ่ม)"), list, h("button", { class: "ghost addrow2", type: "button", onclick: add }, "+ เพิ่มเอกสาร")));
   }));
   draw();
-  const save = () => api("/versions/" + vid, send("PUT", { steps: steps.filter((s) => s.title.trim()) }));
+  const toStep = (s) => {  // rows -> documents + formats; blanks and repeated names are dropped, the default formats are not stored
+    const { rows, formats, ...rest } = s, docs = [], fm = {};
+    for (const r of rows) { const n = r.name.trim(); if (!n || docs.includes(n)) continue; docs.push(n); if (r.fmts && !isDefaultFmts(r.fmts)) fm[n] = r.fmts; }
+    return { ...rest, documents: docs, ...(Object.keys(fm).length ? { formats: fm } : {}) };
+  };
+  const save = () => api("/versions/" + vid, send("PUT", { steps: steps.filter((s) => s.title.trim()).map(toStep) }));
   show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: back }, "← กลับ")),
     h("section", { class: "card" }, h("h2", {}, v.type_name + (live ? "" : " (ฉบับร่าง)")),
       h("p", { class: "muted" }, live ? "แก้ข้อความที่ AI เขียนผิดได้ทันที ถ้ามีนักวิจัยเริ่มส่งงานแล้ว เพิ่มหรือลบขั้นตอนไม่ได้" : "ยังไม่ใช้งานจริงจนกว่าจะกดอนุมัติ"), box,
       h("div", { class: "actions" },
-        h("button", { class: "ghost", type: "button", onclick: () => { steps.push({ title: "", documents: [], page: null, unsure: false }); draw(); } }, "+ เพิ่มขั้นตอน"),
-        live ? null : h("button", { class: "ghost", type: "button", onclick: (ev) => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) runProgress(ev.target, "AI กำลังร่างขั้นตอนใหม่", (say) => apiStream("/versions/" + vid + "/redraft", { method: "POST" }, say), () => draftEditor(vid), () => draftEditor(vid)); } }, "ให้ AI ร่างใหม่"),
+        h("button", { class: "ghost", type: "button", onclick: () => { steps.push({ title: "", documents: [], rows: [], page: null, unsure: false }); draw(); } }, "+ เพิ่มขั้นตอน"),
+        live || !v.source_file ? null : h("button", { class: "ghost", type: "button", onclick: (ev) => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) runProgress(ev.target, "AI กำลังร่างขั้นตอนใหม่", (say) => apiStream("/versions/" + vid + "/redraft", { method: "POST" }, say), () => draftEditor(vid), () => draftEditor(vid)); } }, "ให้ AI ร่างใหม่"),
         live ? h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); back(); }) }, "บันทึก")
           : h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); await api("/versions/" + vid + "/approve", { method: "POST" }); tab = "types"; staffHome(); }) }, "อนุมัติและเริ่มใช้งาน"))));
 }
@@ -605,12 +645,15 @@ const removeChat = () => document.querySelectorAll("#chat-drawer, #chat-fab").fo
 // one Escape listener for the page, not one per login: closes the notification list first, then the chat drawer
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
+  const pill = document.querySelector(".fpill[open]");
+  if (pill) { pill.open = false; pill.querySelector("summary").focus(); return; }
   const notes = document.getElementById("notes");
   if (!notes.hidden) { notes.hidden = true; document.getElementById("bell").setAttribute("aria-expanded", "false"); document.getElementById("bell").focus(); return; }
   document.querySelector("#chat-drawer:not([hidden]) .chat-head button")?.click();
 });
-// a click anywhere outside the notification list closes it
+// a click anywhere outside the notification list or an open formats pill closes it
 document.addEventListener("click", (ev) => {
+  document.querySelectorAll(".fpill[open]").forEach((d) => { if (!d.contains(ev.target)) d.open = false; });
   const notes = document.getElementById("notes");
   if (!notes.hidden && !ev.target.closest("#notes, #bell")) { notes.hidden = true; document.getElementById("bell").setAttribute("aria-expanded", "false"); }
 });
@@ -654,22 +697,84 @@ function mountBell() {
   bellTimer = setInterval(refresh, 60000);
 }
 
-// ---------- LINE: a researcher links their LINE account by typing a one-time code into the LINE chat ----------
-async function mountLine() {
-  const btn = document.getElementById("linebtn");
-  btn.hidden = true;
-  if (!me || me.role !== "researcher") return;
-  const st = await api("/api/line/status").catch(() => null);
-  if (!st?.enabled) return;
-  btn.hidden = false;
-  btn.textContent = st.linked ? "LINE ✓" : "เชื่อม LINE";
-  btn.onclick = act(async () => {
-    const c = await api("/api/line/code", { method: "POST" });
-    const d = modal("เชื่อมบัญชี LINE", () => d.remove(), h("p", {}, "1. เพิ่มเพื่อน LINE ของ RiSA" + (st.bot_id ? " (" + st.bot_id + ")" : "")), h("p", {}, "2. พิมพ์รหัสนี้ส่งในแชทนั้น:"),
-      h("p", { class: "linecode" }, c.code), h("p", { class: "muted" }, "รหัสใช้ได้ " + c.minutes + " นาที ใช้ได้ครั้งเดียว · ยกเลิกการเชื่อมได้โดยพิมพ์ “ยกเลิกการเชื่อมต่อ” ใน LINE"));
-    document.body.append(d); d.showModal();
-  });
+// ---------- profile: /profile shows the person's own details, LINE link and logout ----------
+let avatarV = Date.now();  // changes when the photo changes, so the browser fetches it again
+const avatar = (p) => p.photo ? h("img", { class: "av", src: "/api/track/profile/avatar?v=" + avatarV, alt: "" })
+  : h("span", { class: "av", style: p.avatar_color ? "background:" + p.avatar_color + ";color:#fff" : null }, p.name[0].toUpperCase());
+const AVATAR_COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#be123c", "#b45309", "#475569"];  // same list as the server
+
+function renderWho() {
+  document.getElementById("who").replaceChildren(...(me ? [avatar(me), h("span", {}, me.name, h("small", {}, ROLE[me.role]))] : []));
 }
+
+// the photo is cropped square and shrunk to 256 px in the browser, so uploads stay small whatever the camera made
+async function squarePhoto(file) {
+  const bmp = await createImageBitmap(file).catch(() => { throw new Error("ใช้ได้เฉพาะรูป JPG, PNG หรือ WebP"); });
+  const s = Math.min(bmp.width, bmp.height), c = document.createElement("canvas");
+  c.width = c.height = 256;
+  c.getContext("2d").drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, 256, 256);
+  return new Promise((ok, no) => c.toBlob((b) => b ? ok(b) : no(new Error("อ่านรูปไม่ได้")), "image/jpeg", 0.85));
+}
+
+// a researcher links their LINE account by typing a one-time code into the LINE chat
+async function lineCard() {
+  const st = await api("/api/line/status").catch(() => null);
+  if (!st?.enabled) return null;
+  const card = h("section", { class: "card" });
+  const draw = (linked) => card.replaceChildren(h("h2", {}, "LINE"),
+    h("p", { class: "muted sub" }, linked ? "เชื่อมบัญชี LINE แล้ว ✓ ถามคำถามและรับแจ้งเตือนผ่าน LINE ได้" : "เชื่อมบัญชี LINE เพื่อถามคำถามและรับแจ้งเตือนผ่าน LINE"),
+    h("div", { class: "actions" }, linked
+      ? h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/api/line/unlink", { method: "POST" }); draw(false); }) }, "ยกเลิกการเชื่อม")
+      : h("button", { class: "primary", type: "button", onclick: act(async () => {
+        const c = await api("/api/line/code", { method: "POST" });
+        const d = modal("เชื่อมบัญชี LINE", async () => { d.remove(); draw((await api("/api/line/status").catch(() => st)).linked); },
+          h("p", {}, "1. เพิ่มเพื่อน LINE ของ RiSA" + (st.bot_id ? " (" + st.bot_id + ")" : "")), h("p", {}, "2. พิมพ์รหัสนี้ส่งในแชทนั้น:"),
+          h("p", { class: "linecode" }, c.code), h("p", { class: "muted" }, "รหัสใช้ได้ " + c.minutes + " นาที ใช้ได้ครั้งเดียว · ยกเลิกการเชื่อมได้โดยพิมพ์ “ยกเลิกการเชื่อมต่อ” ใน LINE"));
+        document.body.append(d); d.showModal();
+      }) }, "เชื่อม LINE")));
+  draw(st.linked);
+  return card;
+}
+
+async function profileScreen() {
+  const p = await api("/profile");
+  let color = p.avatar_color;
+  const preview = h("div", { class: "avbig" });
+  const drawAvatar = () => preview.replaceChildren(avatar({ ...p, avatar_color: color }));
+  const mark = () => [...swatches.children].forEach((b, i) => b.setAttribute("aria-pressed", String(AVATAR_COLORS[i] === (color || AVATAR_COLORS[0]))));
+  const swatches = h("div", { class: "swatches", role: "group", "aria-label": "สีโปรไฟล์" }, AVATAR_COLORS.map((c) => h("button", {
+    type: "button", class: "swatch", style: "background:" + c, "aria-label": c, onclick: () => { color = c; drawAvatar(); mark(); } })));
+  mark();
+  drawAvatar();
+  const pick = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp", hidden: true, onchange: act(async () => {
+    const f = pick.files[0]; pick.value = "";
+    if (!f) return;
+    await api("/profile/avatar", { method: "PUT", body: form({ file: await squarePhoto(f) }).body });
+    avatarV = Date.now(); me.photo = true; profileScreen().catch(fail);
+  }) });
+  const field = (label, input, hint) => h("label", { class: "pfield" }, h("span", {}, label), input, hint ? h("small", { class: "muted" }, hint) : null);
+  const name = h("input", { type: "text", maxlength: 80, required: true, value: p.name, autocomplete: "name" });
+  const phone = h("input", { type: "tel", maxlength: 20, value: p.phone, autocomplete: "tel", inputmode: "tel" });
+  const faculty = h("input", { type: "text", maxlength: 100, value: p.faculty, autocomplete: "organization" });
+  const saved = h("span", { class: "muted", role: "status" });
+  const save = h("button", { class: "primary", type: "submit" }, "บันทึก");
+  const logout = h("button", { class: "ghost", type: "button", onclick: doLogout }, "ออกจากระบบ");
+  const info = h("form", { class: "card profile", onsubmit: act(async (ev) => {
+    ev.preventDefault(); saved.textContent = "";
+    const r = await api("/profile", send("PUT", { name: name.value, phone: phone.value, faculty: faculty.value, avatar_color: color }));
+    me = { ...me, name: r.name, avatar_color: r.avatar_color }; renderWho(); saved.textContent = "บันทึกแล้ว ✓";
+  }) },
+    h("div", { class: "avhead" }, preview, h("div", { class: "avside" }, swatches, h("div", { class: "actions" },
+      h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, p.photo ? "เปลี่ยนรูป" : "อัปโหลดรูป"),
+      p.photo ? h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/profile/avatar", { method: "DELETE" }); avatarV = Date.now(); me.photo = false; profileScreen().catch(fail); }) }, "ลบรูป") : null, pick))),
+    field("ชื่อที่แสดง", name), field("เบอร์โทร", phone, "เจ้าหน้าที่ใช้ติดต่อเมื่อเอกสารต้องแก้ไข"), field("คณะ / หน่วยงาน", faculty),
+    h("div", { class: "pfield" }, h("span", {}, "อีเมล / รหัสผู้ใช้"), h("b", {}, p.id), h("small", { class: "muted" }, "บทบาท: " + ROLE[p.role] + " · แก้ไขเองไม่ได้ ติดต่อเจ้าหน้าที่หากไม่ถูกต้อง")),
+    h("div", { class: "actions" }, save, saved));
+  show(h("div", { class: "formbar" }, h("a", { class: "ghost", href: "/" }, "← กลับ")), h("h1", { class: "page-title" }, "โปรไฟล์ของฉัน"), info,
+    p.role === "researcher" ? await lineCard() : null, h("div", { class: "actions" }, logout));
+}
+
+const doLogout = async () => { await api("/logout", { method: "POST" }); if (location.pathname !== "/") location.assign("/"); else start(); };
 
 // ---------- start ----------
 async function boot() {
@@ -677,13 +782,13 @@ async function boot() {
   openReq = null; homeFilter = "";  // a new login starts on the overview
   try { me = await api("/me"); } catch { me = null; }
   const logout = document.getElementById("logout");
-  document.getElementById("who").replaceChildren(...(me ? [h("span", { class: "av" }, me.name[0].toUpperCase()), h("span", {}, me.name, h("small", {}, ROLE[me.role]))] : []));
+  renderWho();
   logout.hidden = !me;
   document.getElementById("chatlink").hidden = !me || me.role !== "researcher";  // staff do not use the chat
-  mountLine();
+  logout.onclick = doLogout;
+  if (!me) { tab = "queue"; mountBell(); return loginScreen(); }  // the next staff member starts on the inbox
+  if (location.pathname === "/profile") return profileScreen();  // no bell here: a notification opens a request, which lives on the home page
   mountBell();
-  logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
-  if (!me) { tab = "queue"; return loginScreen(); }  // the next staff member starts on the inbox
   users = await api("/users");
   await (me.role === "staff" ? staffHome : researcherHome)();
   if (me.role === "researcher") chatDrawer();

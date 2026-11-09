@@ -17,6 +17,7 @@ from app.rag.extract import extract_pages, extract_text
 from app.rag.rag import chat as llm
 from app.features.forms_ai import draft_form
 from app.features.steps_ai import draft_steps, screen_document
+from app.features.tracker import allowed_exts
 
 router = APIRouter(prefix="/api/track")
 
@@ -78,7 +79,68 @@ def logout(response: Response):
 
 @router.get("/me")
 def me(user: User = Depends(current_user)):
-    return {"id": user.id, "name": user.name, "role": user.role}
+    p = state.get_tracker().get_profile(user.id)
+    return {"id": user.id, "name": user.name, "role": user.role, "avatar_color": p["avatar_color"], "photo": p["photo"]}
+
+
+class ProfileIn(BaseModel):
+    name: str
+    phone: str = ""
+    faculty: str = ""
+    avatar_color: str = ""
+
+
+@router.get("/profile")
+def profile(user: User = Depends(current_user)):
+    return state.get_tracker().get_profile(user.id)
+
+
+@router.put("/profile")
+def update_profile(body: ProfileIn, user: User = Depends(current_user)):
+    tk = state.get_tracker()
+    try:
+        tk.set_profile(user.id, body.name, body.phone, body.faculty, body.avatar_color)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return tk.get_profile(user.id)
+
+
+MAX_AVATAR = 300_000  # the page shrinks the photo to 256 px first, so a real one is far smaller
+
+
+def _image_type(data: bytes) -> str | None:
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+@router.put("/profile/avatar")
+def set_avatar(file: UploadFile = File(...), user: User = Depends(current_user)):
+    data = file.file.read(MAX_AVATAR + 1)
+    if len(data) > MAX_AVATAR:
+        raise HTTPException(400, "รูปใหญ่เกินไป")
+    if _image_type(data) is None:
+        raise HTTPException(400, "ใช้ได้เฉพาะรูป JPG, PNG หรือ WebP")
+    state.get_tracker().set_avatar(user.id, data)
+    return {"ok": True}
+
+
+@router.delete("/profile/avatar")
+def delete_avatar(user: User = Depends(current_user)):
+    state.get_tracker().set_avatar(user.id, None)
+    return {"ok": True}
+
+
+@router.get("/profile/avatar")
+def get_avatar(user: User = Depends(current_user)):
+    data = state.get_tracker().avatar_of(user.id)
+    if not data:
+        raise HTTPException(404, "no photo")
+    return Response(data, media_type=_image_type(data), headers={"Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/submissions")
@@ -228,7 +290,12 @@ def types(_: User = Depends(require_staff)):
 
 
 @router.post("/types")
-def create_type(request: Request, name: str = Form(""), file: UploadFile = File(...), _: User = Depends(require_staff)):
+def create_type(request: Request, name: str = Form(""), file: UploadFile | None = File(None), _: User = Depends(require_staff)):
+    """With a guide file the AI drafts the steps; without one staff must give a name and fill the steps in by hand."""
+    if file is None or not file.filename:
+        if not name.strip():
+            raise HTTPException(400, "give the type a name, or upload a document for the AI to name it")
+        return {"version_id": state.get_tracker().create_type(name.strip(), [{"title": "ขั้นตอนที่ 1", "documents": []}], ""), "name": name.strip()}
     path = _save_upload(file, "types")
 
     def work(say):
@@ -279,7 +346,8 @@ def _delete(call, arg: int) -> dict:
     except ValueError:
         raise HTTPException(409, "มีงานที่ใช้อยู่แล้ว ลบไม่ได้")
     for f in files:
-        Path(f).unlink(missing_ok=True)
+        if f:  # a type made by hand has no source file
+            Path(f).unlink(missing_ok=True)
     return {"ok": True}
 
 
@@ -429,6 +497,8 @@ def redraft(request: Request, vid: int, _: User = Depends(require_staff)):
     v = tk.get_version(vid)
     if not v or v["status"] != "draft":
         raise HTTPException(400, "not an editable draft")
+    if not v["source_file"]:
+        raise HTTPException(400, "this type has no document for the AI to read")
 
     def work(say):
         steps = _draft(Path(v["source_file"]), say)
@@ -464,7 +534,7 @@ def upload(request: Request, sid: int, doc_name: str = Form(...), file: UploadFi
     _check_slot(sub, step, doc_name)
     if _approved_form(sub["type_id"], doc_name):
         raise HTTPException(400, "this document is filled in on the website, not uploaded")
-    path = _save_upload(file, f"submissions/{sid}")
+    path = _save_upload(file, f"submissions/{sid}", allowed_exts(step, doc_name))
 
     def work(say):
         findings, status = None, "cannot_check"  # a failed check never blocks sending

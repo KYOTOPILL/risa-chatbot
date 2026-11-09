@@ -149,6 +149,7 @@ def download(doc_id: str):
 
 
 @app.get("/")
+@app.get("/profile")  # same page: home.js shows the profile when the path is /profile
 def home():
     return FileResponse(WEB / "home.html")
 

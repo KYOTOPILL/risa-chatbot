@@ -186,3 +186,13 @@ def code(user: User = Depends(require_researcher)):
         c = f"{secrets.randbelow(10**6):06d}"
     _codes[c] = (user.id, now + CODE_MINUTES * 60)
     return {"code": c, "minutes": CODE_MINUTES}
+
+
+@router.post("/unlink")
+def unlink(user: User = Depends(require_researcher)):
+    """Cut every LINE account linked to this user (the profile page button); linking again needs a new code."""
+    tk = state.get_tracker()
+    for line_id in tk.lines_for([user.id]):
+        _history.pop(line_id, None)
+    tk.unlink_user(user.id)
+    return {"ok": True}
