@@ -1,5 +1,4 @@
 """What the chat may tell a researcher about their own requests. Built only from that researcher's data."""
-from app.core.config import MOCK_USERS
 
 DOC_STATUS = {"draft": "บันทึกแบบร่างไว้ ยังกรอกไม่ครบและยังไม่ได้ส่ง", "screened": "AI ตรวจสอบแล้ว แต่ยังไม่ได้ส่งให้เจ้าหน้าที่", "cannot_check": "บันทึกแล้ว AI ตรวจสอบไม่ได้ ยังไม่ได้ส่งให้เจ้าหน้าที่",
               "sent": "ส่งแล้ว รอเจ้าหน้าที่ตรวจสอบ", "approved": "อนุมัติแล้ว"}
@@ -23,7 +22,7 @@ def describe(tk, user_id: str) -> str:
     out = []
     for s in subs:
         d = tk.get_submission(s["id"], user_id, "researcher")
-        staff = MOCK_USERS.get(d["staff_id"], {}).get("name", d["staff_id"])
+        staff = tk.name_of(d["staff_id"])
         head = f"งาน: {d['title']} (ประเภท {d['type_name']}) เจ้าหน้าที่ผู้รับผิดชอบ: {staff}"
         if d["current_step"] >= d["step_count"]:
             out.append(head + "\n  ดำเนินการเสร็จสิ้น")

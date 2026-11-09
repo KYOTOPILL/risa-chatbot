@@ -3,6 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.core.config import MOCK_USERS
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS types (id INTEGER PRIMARY KEY, name TEXT NOT NULL, open INTEGER NOT NULL DEFAULT 0, owner_id TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS versions (
@@ -29,7 +31,11 @@ CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, name TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, submission_id INTEGER NOT NULL, text TEXT NOT NULL,
     seen INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('researcher', 'staff')),
+    created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS line_links (line_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
+ROLES = {"researcher", "staff"}
 UPLOAD_STATUSES = {"draft", "screened", "cannot_check", "sent", "approved", "returned"}
 
 
@@ -80,9 +86,11 @@ class Tracker:
         with self._db() as db:
             db.executescript(SCHEMA)
             have = {r["name"] for r in db.execute("PRAGMA table_info(types)")}
-            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''"), ("category_id", "INTEGER")):  # databases made before posts existed
+            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''"), ("category_id", "INTEGER"), ("pinned", "INTEGER NOT NULL DEFAULT 0"), ("audience", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
                 if col not in have:
                     db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
+            # ponytail: demo accounts seeded so the mock login works; drop this line once CMU login creates users (upsert_user)
+            db.executemany("INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)", [(i, u["name"], u["role"]) for i, u in MOCK_USERS.items()])
             if "answers" not in {r["name"] for r in db.execute("PRAGMA table_info(uploads)")}:
                 db.execute("ALTER TABLE uploads ADD COLUMN answers TEXT NOT NULL DEFAULT '[]'")
 
@@ -117,6 +125,17 @@ class Tracker:
                            (json.dumps(steps, ensure_ascii=False), version_id)).rowcount
         if not n:
             raise ValueError("version is not an editable draft")
+
+    def update_live(self, version_id: int, steps: list) -> None:
+        """Fix the text of a live version. Once requests use it the step count is fixed: they point at steps by position."""
+        validate_steps(steps)
+        with self._db() as db:
+            row = db.execute("SELECT steps FROM versions WHERE id = ? AND status = 'approved'", (version_id,)).fetchone()
+            if not row:
+                raise ValueError("version is not live")
+            if len(steps) != len(json.loads(row["steps"])) and self._used(db, "v.id", version_id):
+                raise ValueError("requests already use this version: you can edit the text but not add or remove steps")
+            db.execute("UPDATE versions SET steps = ? WHERE id = ?", (json.dumps(steps, ensure_ascii=False), version_id))
 
     def approve(self, version_id: int) -> None:
         with self._db() as db:
@@ -153,11 +172,11 @@ class Tracker:
             db.execute("DELETE FROM types WHERE id = ?", (type_id,))
         return [r["source_file"] for r in rows]
 
-    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id, t.category_id AS category_id FROM versions v JOIN types t ON t.id = v.type_id"
+    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id, t.category_id AS category_id, t.pinned AS pinned, t.audience AS audience FROM versions v JOIN types t ON t.id = v.type_id"
 
     @staticmethod
     def _version(row) -> dict:
-        return {**dict(row), "steps": json.loads(row["steps"])}
+        return {**dict(row), "steps": json.loads(row["steps"]), "audience": json.loads(row["audience"]) if row["audience"] else None}  # None = every researcher
 
     def get_version(self, version_id: int) -> dict | None:
         with self._db() as db:
@@ -247,6 +266,19 @@ class Tracker:
             if not db.execute("UPDATE types SET category_id = ? WHERE id = ?", (category_id, type_id)).rowcount:
                 raise KeyError(type_id)
 
+    def rename_type(self, type_id: int, name: str) -> None:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("type needs a name")
+        with self._db() as db:
+            if not db.execute("UPDATE types SET name = ? WHERE id = ?", (name, type_id)).rowcount:
+                raise KeyError(type_id)
+
+    def set_type_pinned(self, type_id: int, pinned: bool) -> None:
+        with self._db() as db:
+            if not db.execute("UPDATE types SET pinned = ? WHERE id = ?", (int(pinned), type_id)).rowcount:
+                raise KeyError(type_id)
+
     # ---- posts: an open type is listed for researchers, who start their own request; the owner is staff in charge of those ----
     def set_type_open(self, type_id: int, is_open: bool, owner_id: str | None = None) -> None:
         with self._db() as db:
@@ -255,8 +287,69 @@ class Tracker:
             else:
                 db.execute("UPDATE types SET open = ?, owner_id = ? WHERE id = ?", (int(is_open), owner_id, type_id))
 
-    def list_open_types(self) -> list[dict]:
-        return [v for v in self.list_types() if v["open"]]
+    # ---- users: id (a CMU email once real login lands), display name, role. No passwords here. ----
+    def get_user(self, user_id: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT id, name, role FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_users(self) -> list[dict]:
+        with self._db() as db:
+            return [dict(r) for r in db.execute("SELECT id, name, role FROM users ORDER BY role, name")]
+
+    def upsert_user(self, user_id: str, name: str, role: str = "researcher") -> None:
+        """Call on every login: a new person is added with `role`; a known one only gets their name refreshed (staff decide roles)."""
+        if role not in ROLES:
+            raise ValueError("unknown role")
+        with self._db() as db:
+            db.execute("INSERT INTO users (id, name, role) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name", (user_id, name, role))
+
+    def set_role(self, user_id: str, role: str) -> None:
+        if role not in ROLES:
+            raise ValueError("unknown role")
+        with self._db() as db:
+            if not db.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id)).rowcount:
+                raise KeyError(user_id)
+
+    # ---- LINE: which LINE account belongs to which user (linked once with a code from the website) ----
+    def link_line(self, line_id: str, user_id: str) -> None:
+        with self._db() as db:
+            db.execute("INSERT INTO line_links (line_id, user_id) VALUES (?, ?) ON CONFLICT(line_id) DO UPDATE SET user_id = excluded.user_id", (line_id, user_id))
+
+    def user_for_line(self, line_id: str) -> str | None:
+        with self._db() as db:
+            row = db.execute("SELECT user_id FROM line_links WHERE line_id = ?", (line_id,)).fetchone()
+        return row["user_id"] if row else None
+
+    def unlink_line(self, line_id: str) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM line_links WHERE line_id = ?", (line_id,))
+
+    def lines_for(self, user_ids: list[str]) -> list[str]:
+        with self._db() as db:
+            return [r[0] for r in db.execute(f"SELECT line_id FROM line_links WHERE user_id IN ({','.join('?' * len(user_ids))})", user_ids)] if user_ids else []
+
+    def has_line(self, user_id: str) -> bool:
+        with self._db() as db:
+            return db.execute("SELECT 1 FROM line_links WHERE user_id = ?", (user_id,)).fetchone() is not None
+
+    def role_of(self, user_id: str) -> str | None:
+        u = self.get_user(user_id)
+        return u["role"] if u else None
+
+    def name_of(self, user_id: str) -> str:
+        u = self.get_user(user_id)
+        return u["name"] if u else user_id
+
+    def set_type_audience(self, type_id: int, user_ids: list[str] | None) -> None:
+        """Who may see and start an open type: None = every researcher, else only these user ids."""
+        with self._db() as db:
+            if not db.execute("UPDATE types SET audience = ? WHERE id = ?", (json.dumps(user_ids) if user_ids else "", type_id)).rowcount:
+                raise KeyError(type_id)
+
+    def list_open_types(self, user_id: str | None = None) -> list[dict]:
+        """Open types; with a user id, only those that user is allowed to see."""
+        return [v for v in self.list_types() if v["open"] and (user_id is None or v["audience"] is None or user_id in v["audience"])]
 
     # ---- submissions ----
     def create_submission(self, title: str, version_id: int, researcher_ids: list[str], staff_id: str, actor: str | None = None) -> int:
@@ -308,9 +401,17 @@ class Tracker:
         return sub
 
     # ---- notifications: what changed on a request, for each person involved except the one who did it ----
+    on_notify = None  # optional hook (tracker, user_ids, text) called after notifications are saved; the web layer sets it to push to LINE
+
     def _notify(self, sid: int, text: str, to: list[str], actor: str | None) -> None:
+        who = [u for u in dict.fromkeys(to) if u != actor]
         with self._db() as db:
-            db.executemany("INSERT INTO notifications (user_id, submission_id, text) VALUES (?, ?, ?)", [(u, sid, text) for u in dict.fromkeys(to) if u != actor])
+            db.executemany("INSERT INTO notifications (user_id, submission_id, text) VALUES (?, ?, ?)", [(u, sid, text) for u in who])
+        if who and self.on_notify:
+            try:
+                self.on_notify(self, who, text)
+            except Exception:  # an alert that fails must never undo the change that caused it
+                pass
 
     def _researchers(self, sid: int) -> list[str]:
         with self._db() as db:

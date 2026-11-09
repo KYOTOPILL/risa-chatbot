@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request
 
+from app.core import state
 from app.core.config import MOCK_USERS, SESSION_SECRET, SESSION_TTL
 
 
@@ -20,7 +21,7 @@ def _sign(uid: str) -> str:
 
 
 def authenticate(username: str, password: str) -> str | None:
-    """User id for a right username and password, else None."""
+    """User id for a right username and password, else None. Mock only: passwords live in config, never in the users table."""
     for uid, u in MOCK_USERS.items():
         if hmac.compare_digest(username.encode(), u["username"].encode()) & hmac.compare_digest(password.encode(), u["password"].encode()):
             return uid
@@ -49,11 +50,13 @@ def login_failed(key: str) -> None:  # ponytail: in memory, per ip+username; sha
 def current_user(request: Request) -> User:
     uid, _, rest = request.cookies.get("uid", "").partition(".")
     exp, _, sig = rest.partition(".")
-    if (uid not in MOCK_USERS or not exp.isdigit() or int(exp) < time.time()
+    if (not exp.isdigit() or int(exp) < time.time()
             or not hmac.compare_digest(sig.encode(), _sign(f"{uid}.{exp}").encode())):
         raise HTTPException(401, "login required")
-    u = MOCK_USERS[uid]
-    return User(uid, u["name"], u["role"])
+    u = state.get_tracker().get_user(uid)  # read every request, so a role change applies without a new login
+    if u is None:
+        raise HTTPException(401, "login required")
+    return User(u["id"], u["name"], u["role"])
 
 
 def require_staff(user: User = Depends(current_user)) -> User:

@@ -245,3 +245,17 @@ def test_stale_approval_does_not_log_a_second_advance(docs):
     tk.latest_uploads = racing
     assert tk.review_upload(b, "s1", "approve", [], "") is False
     assert [e["to_step"] for e in tk.get_submission(sid, "s1", "staff")["events"]] == [1]
+
+
+def test_update_live_edits_text_but_locks_step_count_once_used(tk):
+    v = tk.create_type("CMU", STEPS, "cmu.pdf")
+    with pytest.raises(ValueError):
+        tk.update_live(v, STEPS)  # still a draft
+    tk.approve(v)
+    two = [{**STEPS[0], "title": "Fixed"}, {**STEPS[0], "title": "Second"}]
+    tk.update_live(v, two)  # unused: add a step freely
+    assert [s["title"] for s in tk.get_version(v)["steps"]] == ["Fixed", "Second"]
+    tk.create_submission("x", v, ["r1"], "s1", "r1")
+    tk.update_live(v, [{**two[0], "title": "Fixed 2"}, two[1]])  # used: same count is fine
+    with pytest.raises(ValueError):
+        tk.update_live(v, two[:1])

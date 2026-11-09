@@ -12,13 +12,15 @@
 <div class="adm">
   <header class="top">
     <div class="brand"><span class="mark">RiSA</span></div>
-    <div class="tools"><span id="who" class="me"></span><button class="lnk bell" id="bell" type="button" hidden>แจ้งเตือน<span class="n" id="bellN" hidden></span></button><a class="lnk" id="chatlink" href="/chat" hidden>แชทกับ AI</a><button class="lnk" id="logout" type="button" hidden>ออกจากระบบ</button></div>
+    <div class="tools"><span id="who" class="me"></span><button class="lnk bell" id="bell" type="button" hidden>แจ้งเตือน<span class="n" id="bellN" hidden></span></button><a class="lnk" id="chatlink" href="/chat" hidden>แชทกับ AI</a><button class="lnk" id="linebtn" type="button" hidden>เชื่อม LINE</button><button class="lnk" id="logout" type="button" hidden>ออกจากระบบ</button></div>
     <div id="notes" class="notes" role="dialog" aria-label="แจ้งเตือน" hidden></div>
   </header>
   <main id="app"></main>
 </div>
 <!-- files tab markup: files.js mounts on it the first time a staff member opens the tab; it lives outside #app so tab changes keep it -->
 <div id="files-root" hidden>
+<h1 class="page-title">คลังเอกสาร</h1>
+<p class="muted sub">เอกสารที่ AI ใช้ตอบคำถามในแชท จัดเป็นโฟลเดอร์ และเลือกไฟล์ที่ให้ดาวน์โหลดผ่านแชทได้</p>
 <section class="card drive" id="list">
     <div class="between">
       <nav id="crumbs" class="crumbs" aria-label="โฟลเดอร์"></nav>

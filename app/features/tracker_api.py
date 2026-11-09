@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.core import state
 from app.core.auth import User, authenticate, current_user, login_allowed, login_failed, require_staff, session_value
-from app.core.config import COOKIE_SECURE, MAX_UPLOAD_BYTES, MOCK_USERS, SESSION_TTL, UPLOAD_DIR
+from app.core.config import COOKIE_SECURE, MAX_UPLOAD_BYTES, SESSION_TTL, UPLOAD_DIR
 from app.rag.extract import extract_pages, extract_text
 from app.rag.rag import chat as llm
 from app.features.forms_ai import draft_form
@@ -48,9 +48,13 @@ class MoveIn(BaseModel):
     note: str = ""
 
 
-@router.get("/mock-users")
-def mock_users(_user: User = Depends(current_user)):
-    return [{"id": i, "name": u["name"], "role": u["role"]} for i, u in MOCK_USERS.items()]
+@router.get("/users")
+def users(_user: User = Depends(current_user)):
+    return state.get_tracker().list_users()
+
+
+def _role(uid: str) -> str | None:
+    return state.get_tracker().role_of(uid)
 
 
 @router.post("/login")
@@ -63,7 +67,7 @@ def login(body: LoginIn, request: Request, response: Response):
         login_failed(key)
         raise HTTPException(401, "wrong username or password")
     response.set_cookie("uid", session_value(uid), httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_TTL)
-    return {"id": uid, "name": MOCK_USERS[uid]["name"], "role": MOCK_USERS[uid]["role"]}
+    return state.get_tracker().get_user(uid)
 
 
 @router.post("/logout")
@@ -87,20 +91,13 @@ def submission(sid: int, user: User = Depends(current_user)):
     sub = state.get_tracker().get_submission(sid, user.id, user.role)
     if sub is None:  # missing and not-yours look the same
         raise HTTPException(404, "not found")
-    forms = {}
-    for st in sub["steps"]:
-        for d in st["documents"]:
-            f = state.get_tracker().get_form(sub["type_id"], d)
-            if f and f["status"] == "approved":
-                forms[d] = {"title": f["title"], "fields": f["fields"]}
-    return {**sub, "forms": forms, "uploads": [_public(u) for u in sub["uploads"]]}
+    # ponytail: web forms are switched off, every document is an upload box; delete the forms code when sure
+    return {**sub, "forms": {}, "uploads": [_public(u) for u in sub["uploads"]]}
 
 
 @router.post("/submissions")
 def create_submission(body: SubmissionIn, user: User = Depends(require_staff)):
-    people = [*body.researcher_ids, body.staff_id]
-    if any(p not in MOCK_USERS for p in people) or MOCK_USERS[body.staff_id]["role"] != "staff" \
-            or any(MOCK_USERS[r]["role"] != "researcher" for r in body.researcher_ids):
+    if _role(body.staff_id) != "staff" or any(_role(r) != "researcher" for r in body.researcher_ids):
         raise HTTPException(400, "unknown user or wrong role")
     try:
         return {"id": state.get_tracker().create_submission(body.title, body.version_id, body.researcher_ids, body.staff_id, user.id)}
@@ -137,7 +134,7 @@ class StaffIn(BaseModel):
 @router.post("/submissions/{sid}/staff")
 def reassign(sid: int, body: StaffIn, user: User = Depends(require_staff)):
     """Any staff member may hand a request over, so one person being away never strands it."""
-    if body.staff_id not in MOCK_USERS or MOCK_USERS[body.staff_id]["role"] != "staff":
+    if _role(body.staff_id) != "staff":
         raise HTTPException(400, "the person in charge must be a staff member")
     try:
         state.get_tracker().set_staff(sid, body.staff_id, user.id)
@@ -258,7 +255,7 @@ def publish(type_id: int, body: PublishIn, user: User = Depends(require_staff)):
     """Open a type for researchers. The owner (default: whoever publishes) is staff in charge of every request started from it."""
     tk = state.get_tracker()
     owner = body.owner_id or user.id
-    if owner not in MOCK_USERS or MOCK_USERS[owner]["role"] != "staff":
+    if _role(owner) != "staff":
         raise HTTPException(400, "the owner must be a staff member")
     if not any(v["type_id"] == type_id for v in tk.list_types()):
         if any(v["type_id"] == type_id for v in tk.list_drafts()):
@@ -349,10 +346,41 @@ def set_type_category(type_id: int, body: TypeCategoryIn, _: User = Depends(requ
     return _category(state.get_tracker().set_type_category, type_id, body.category_id)
 
 
+@router.put("/types/{type_id}/name")
+def rename_type(type_id: int, body: CategoryIn, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().rename_type, type_id, body.name)
+
+
+class PinIn(BaseModel):
+    pinned: bool
+
+
+@router.put("/types/{type_id}/pin")
+def pin_type(type_id: int, body: PinIn, _: User = Depends(require_staff)):
+    return _category(state.get_tracker().set_type_pinned, type_id, body.pinned)
+
+
+class AudienceIn(BaseModel):
+    user_ids: list[str] | None = None  # None = every researcher
+
+
+@router.put("/types/{type_id}/audience")
+def set_audience(type_id: int, body: AudienceIn, _: User = Depends(require_staff)):
+    """Limit an open type to chosen researchers, or open it to all again."""
+    ids = body.user_ids
+    if ids is not None:
+        if not ids:
+            raise HTTPException(400, "choose at least one researcher")
+        if any(_role(i) != "researcher" for i in ids):
+            raise HTTPException(400, "only researchers can be chosen")
+        ids = sorted(set(ids))
+    return _category(state.get_tracker().set_type_audience, type_id, ids)
+
+
 @router.get("/open-types")
-def open_types(_: User = Depends(current_user)):
-    return [{"type_id": v["type_id"], "type_name": v["type_name"], "category_id": v["category_id"], "owner_id": v["owner_id"], "owner_name": MOCK_USERS.get(v["owner_id"], {}).get("name", ""),
-             "steps": [{"title": st["title"], "documents": st["documents"]} for st in v["steps"]]} for v in state.get_tracker().list_open_types()]
+def open_types(user: User = Depends(current_user)):
+    return [{"type_id": v["type_id"], "type_name": v["type_name"], "category_id": v["category_id"], "pinned": bool(v["pinned"]), "owner_id": v["owner_id"], "owner_name": state.get_tracker().name_of(v["owner_id"]) if v["owner_id"] else "",
+             "steps": [{"title": st["title"], "documents": st["documents"]} for st in v["steps"]]} for v in state.get_tracker().list_open_types(None if user.role == "staff" else user.id)]
 
 
 @router.post("/open-types/{type_id}/start")
@@ -360,7 +388,7 @@ def start_request(type_id: int, user: User = Depends(current_user)):
     if user.role != "researcher":
         raise HTTPException(403, "researchers only")
     tk = state.get_tracker()
-    v = next((v for v in tk.list_open_types() if v["type_id"] == type_id), None)
+    v = next((v for v in tk.list_open_types(user.id) if v["type_id"] == type_id), None)  # a post limited to others is not open for this user
     if v is None:
         raise HTTPException(404, "this post is not open")
     mine = next((s for s in tk.list_submissions(user.id, "researcher") if s["type_id"] == type_id), None)
@@ -386,8 +414,10 @@ def new_version(request: Request, type_id: int, file: UploadFile = File(...), _:
 
 @router.put("/versions/{vid}")
 def edit_version(vid: int, body: StepsIn, _: User = Depends(require_staff)):
+    tk = state.get_tracker()
     try:
-        state.get_tracker().update_draft(vid, body.steps)
+        v = tk.get_version(vid)
+        (tk.update_live if v and v["status"] == "approved" else tk.update_draft)(vid, body.steps)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True}

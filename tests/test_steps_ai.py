@@ -102,3 +102,9 @@ def test_screen_keeps_field_and_fix_sorts_by_kind_and_caps_at_eight():
     out = screen_document("t", {"title": "S", "documents": ["D"]}, "D", None, llm=lambda m: json.dumps(items))
     assert len(out) == 8 and out[0] == {"kind": "missing", "text": "absent", "field": "Budget", "fix": "add it"}
     assert [f["kind"] for f in out].count("unclear") == 0 and "field" not in out[1]  # 8 kept: missing first, then incorrect; unclear fell off the cap
+
+
+def test_draft_strips_copied_template_placeholders():
+    reply = json.dumps([{"title": "ลงนาม {{pi_name}}", "documents": ["ลายมือชื่อ {{pi_name}}, {{dept_head_title}}", "{{only}}", "บันทึกข้อความ"], "page": 1}], ensure_ascii=False)
+    s = draft_steps(["a"], llm=FakeLLM(reply))[0]
+    assert s["title"] == "ลงนาม" and s["documents"] == ["ลายมือชื่อ", "บันทึกข้อความ"]

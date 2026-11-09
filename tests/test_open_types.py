@@ -163,3 +163,50 @@ def test_categories_staff_manage_everyone_reads_types_carry_one(env):
     assert s1.put(f"/api/track/types/{tid}/category", json={"category_id": None}).status_code == 200
     assert s1.delete(f"/api/track/categories/{a}").status_code == 200
     assert s1.delete(f"/api/track/categories/{a}").status_code == 404
+
+
+def test_pin_a_type_staff_only_and_researchers_see_it(env):
+    tk, tid = env
+    s1, r1 = client("s1"), client("r1")
+    publish(s1, tid)
+    assert r1.get("/api/track/open-types").json()[0]["pinned"] is False
+    assert r1.put(f"/api/track/types/{tid}/pin", json={"pinned": True}).status_code == 403
+    assert s1.put(f"/api/track/types/{tid}/pin", json={"pinned": True}).status_code == 200
+    assert r1.get("/api/track/open-types").json()[0]["pinned"] is True
+    assert s1.put("/api/track/types/999/pin", json={"pinned": True}).status_code == 404
+
+
+def test_rename_a_type_staff_only(env):
+    tk, tid = env
+    s1, r1 = client("s1"), client("r1")
+    publish(s1, tid)
+    assert r1.put(f"/api/track/types/{tid}/name", json={"name": "x"}).status_code == 403
+    assert s1.put(f"/api/track/types/{tid}/name", json={"name": "  "}).status_code == 400
+    assert s1.put("/api/track/types/999/name", json={"name": "x"}).status_code == 404
+    assert s1.put(f"/api/track/types/{tid}/name", json={"name": " ทุนใหม่ "}).status_code == 200
+    assert r1.get("/api/track/open-types").json()[0]["type_name"] == "ทุนใหม่"
+
+
+def test_audience_limits_who_sees_and_starts_a_post(env):
+    tk, tid = env
+    s1 = client("s1")
+    publish(s1, tid)
+    assert s1.put(f"/api/track/types/{tid}/audience", json={"user_ids": ["r2"]}).status_code == 200
+    r1, r2 = client("r1"), client("r2")
+    assert r1.get("/api/track/open-types").json() == []
+    assert r1.post(f"/api/track/open-types/{tid}/start").status_code == 404
+    assert [t["type_id"] for t in r2.get("/api/track/open-types").json()] == [tid]
+    assert r2.post(f"/api/track/open-types/{tid}/start").status_code == 200
+    assert next(t for t in s1.get("/api/track/types").json() if t["type_id"] == tid)["audience"] == ["r2"]
+    assert s1.put(f"/api/track/types/{tid}/audience", json={"user_ids": None}).status_code == 200  # back to everyone
+    assert [t["type_id"] for t in r1.get("/api/track/open-types").json()] == [tid]
+
+
+def test_audience_rules(env):
+    _, tid = env
+    s1 = client("s1")
+    assert s1.put(f"/api/track/types/{tid}/audience", json={"user_ids": []}).status_code == 400  # nobody: close the post instead
+    assert s1.put(f"/api/track/types/{tid}/audience", json={"user_ids": ["s2"]}).status_code == 400  # researchers only
+    assert s1.put(f"/api/track/types/{tid}/audience", json={"user_ids": ["nobody"]}).status_code == 400
+    assert s1.put("/api/track/types/9999/audience", json={"user_ids": ["r1"]}).status_code == 404
+    assert client("r1").put(f"/api/track/types/{tid}/audience", json={"user_ids": ["r1"]}).status_code == 403

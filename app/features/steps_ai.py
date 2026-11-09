@@ -12,8 +12,11 @@ DRAFT_PROMPT = (
     "List the application steps in order. Answer with a JSON array only, no other text. Each item: "
     '{"title": step name, "documents": [documents the applicant must prepare for this step], '
     '"page": page number the step comes from, "unsure": true if the step or its documents are not clearly stated}. '
+    "Each document is the short name of a paper or form (a few words), never its contents. "
+    "Never copy template placeholders such as {{name}} or [name] into titles or documents. "
     "Write titles and documents in the document's own language."
 )
+PLACEHOLDER = re.compile(r"\s*\{\{[^{}]*\}\}[,;]?")  # a template field the model copied by mistake
 
 
 def _json(reply: str):
@@ -35,8 +38,9 @@ def draft_steps(pages: list[str], llm=chat) -> list[dict]:
             raise ValueError("bad draft: step without a title")
         docs = it.get("documents")
         page = it.get("page")
-        steps.append({"title": it["title"].strip(),
-                      "documents": [d for d in docs if isinstance(d, str)] if isinstance(docs, list) else [],
+        clean = lambda t: PLACEHOLDER.sub("", t).strip()
+        steps.append({"title": clean(it["title"]) or it["title"].strip(),
+                      "documents": [c for c in (clean(d) for d in docs if isinstance(d, str)) if c] if isinstance(docs, list) else [],
                       "page": page if isinstance(page, int) else None,
                       "unsure": it.get("unsure") is True})
     return steps

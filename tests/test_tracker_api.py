@@ -47,8 +47,8 @@ def test_forged_or_tampered_cookie_is_rejected():
 
 
 def test_user_list_needs_login_and_never_shows_passwords(env):
-    assert TestClient(server.app).get("/api/track/mock-users").status_code == 401
-    got = login("r1").get("/api/track/mock-users").json()
+    assert TestClient(server.app).get("/api/track/users").status_code == 401
+    got = login("r1").get("/api/track/users").json()
     assert "password" not in str(got) and {"id": "s1", "name": "Malee", "role": "staff"} in got
 
 
@@ -172,7 +172,8 @@ def test_edit_redraft_and_approve_a_draft(env, ai, monkeypatch):
     assert tk.get_version(vid)["steps"][0]["title"] == "Edited"
     assert s1.post(f"/api/track/versions/{vid}/redraft").json()["steps"][0]["title"] == "Submit"
     assert s1.post(f"/api/track/versions/{vid}/approve").status_code == 200
-    assert s1.put(f"/api/track/versions/{vid}", json={"steps": new}).status_code == 400  # approved: frozen
+    assert s1.put(f"/api/track/versions/{vid}", json={"steps": new}).status_code == 200  # live: text can still be fixed
+    assert s1.put(f"/api/track/versions/{vid}", json={"steps": []}).status_code == 400
 
 
 def test_new_version_of_existing_type(env, ai):

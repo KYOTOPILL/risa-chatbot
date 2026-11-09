@@ -130,15 +130,16 @@ def test_staff_edit_then_approve_researcher_sees_the_edited_form(env):
     edited = {"doc_name": "Travel claim", "title": "Travel claim v2", "fields": [{"label": "ชื่อ-สกุล", "type": "text", "required": True}]}
     assert s1.put(f"/api/track/types/{tid}/forms", json=edited).status_code == 200
     s1.post(f"/api/track/types/{tid}/forms/approve", json={"doc_name": "Travel claim"})
-    f = r1.get(f"/api/track/submissions/{sid}").json()["forms"]["Travel claim"]
-    assert f["title"] == "Travel claim v2" and [x["label"] for x in f["fields"]] == ["ชื่อ-สกุล"]
+    assert state.get_tracker().get_form(tid, "Travel claim")["title"] == "Travel claim v2"  # saved and approved, but web forms are switched off
+    assert r1.get(f"/api/track/submissions/{sid}").json()["forms"] == {}
 
 
 def test_editing_an_approved_form_keeps_it_approved(env):
     _, sid, tid, _ = env
     publish_form(tid)
     client("s1").put(f"/api/track/types/{tid}/forms", json={"doc_name": "Travel claim", "title": "T", "fields": [{"label": "Only field"}]})
-    assert [x["label"] for x in client("r1").get(f"/api/track/submissions/{sid}").json()["forms"]["Travel claim"]["fields"]] == ["Only field"]
+    assert state.get_tracker().get_form(tid, "Travel claim")["status"] == "approved"
+    assert client("r1").get(f"/api/track/submissions/{sid}").json()["forms"] == {}
 
 
 def test_bad_edits_and_unknown_documents_are_rejected(env):

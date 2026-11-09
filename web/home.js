@@ -15,11 +15,16 @@ const h = (tag, props = {}, ...kids) => {
   return e;
 };
 
+let inflight = 0;  // requests in flight: drives the thin loading bar at the top (home.css)
+const busy = (d) => document.documentElement.classList.toggle("loading", (inflight += d) > 0);
 async function api(path, opts = {}) {
-  const r = await fetch("/api/track" + path, opts);
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : "ผิดพลาด (" + r.status + ")");
-  return body;
+  busy(1);
+  try {
+    const r = await fetch(path.startsWith("/api/") ? path : "/api/track" + path, opts);  // a full /api/... path is used as it is (LINE lives at /api/line)
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : "ผิดพลาด (" + r.status + ")");
+    return body;
+  } finally { busy(-1); }
 }
 // Slow AI steps: the server reports what it is doing; the panel lists each step as it happens, with the seconds the current one has taken.
 async function apiStream(path, opts, onStatus) {
@@ -78,8 +83,18 @@ const KIND = { missing: "ขาดหายไป", incorrect: "อาจไม�
 const ROLE = { researcher: "นักวิจัย", staff: "เจ้าหน้าที่" };
 
 function show(...nodes) { app.replaceChildren(...nodes.flat().filter(Boolean)); }
-function fail(e) { alert(e.message); }
-const act = (fn) => async (ev) => { try { await fn(ev); } catch (e) { fail(e); } };
+// errors show in a toast (screen readers hear it via role=alert) instead of a blocking alert(); a click dismisses it
+const errBox = h("div", { class: "toast atoast", role: "alert", hidden: true, onclick: () => { errBox.hidden = true; } });
+document.body.append(errBox);
+let errTimer = null;
+function toast(text) { errBox.textContent = text; errBox.hidden = false; clearTimeout(errTimer); errTimer = setTimeout(() => { errBox.hidden = true; }, 6000); }
+function fail(e) { toast(e.message); }
+// the clicked button stays disabled until its request settles, so a double click cannot send twice (two requests, two approvals)
+const act = (fn) => async (ev) => {
+  const b = ev?.currentTarget instanceof HTMLButtonElement ? ev.currentTarget : null;
+  if (b) { b.disabled = true; b.setAttribute("aria-busy", "true"); }
+  try { await fn(ev); } catch (e) { fail(e); } finally { if (b) { b.disabled = false; b.removeAttribute("aria-busy"); } }
+};
 
 // ---------- login ----------
 function loginScreen() {
@@ -90,7 +105,7 @@ function loginScreen() {
   const form = h("form", { class: "card login-card", onsubmit: async (ev) => {
     ev.preventDefault();
     err.hidden = true; submit.disabled = true;
-    try { await api("/login", send("POST", { username: user.value.trim(), password: pass.value })); start(); }
+    try { await api("/login", send("POST", { username: user.value.trim(), password: pass.value })); await start(); submit.disabled = false; }  // re-enabled in case loading the home page failed
     catch (e) { err.textContent = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"; err.hidden = false; pass.value = ""; pass.focus(); submit.disabled = false; }
   } },
     h("label", {}, "ชื่อผู้ใช้", user), h("label", {}, "รหัสผ่าน", pass), err, submit);
@@ -132,8 +147,8 @@ function docRow(sub, name, reload) {
     if (!file) return;
     runProgress(ev.target, "กำลังตรวจสอบ “" + name + "”", (say) => apiStream("/submissions/" + sub.id + "/uploads", form({ doc_name: name, file }), say), reload, reload);
   } });
-  const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจสอบ") : null;
-  const withdraw = up && up.status === "sent" ? h("button", { class: "ghost", type: "button", onclick: act(async () => { if (confirm("ถอนเอกสารนี้กลับมาแก้ไข? เจ้าหน้าที่จะไม่เห็นในคิวตรวจสอบจนกว่าจะส่งใหม่")) { await api("/uploads/" + up.id + "/withdraw", { method: "POST" }); reload(); } }) }, "ถอนกลับมาแก้ไข") : null;
+  const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); await reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจสอบ") : null;
+  const withdraw = up && up.status === "sent" ? h("button", { class: "ghost", type: "button", onclick: act(async () => { if (confirm("ถอนเอกสารนี้กลับมาแก้ไข? เจ้าหน้าที่จะไม่เห็นในคิวตรวจสอบจนกว่าจะส่งใหม่")) { await api("/uploads/" + up.id + "/withdraw", { method: "POST" }); await reload(); } }) }, "ถอนกลับมาแก้ไข") : null;
   return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"), withdraw,
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)"))
@@ -146,7 +161,7 @@ function docRow(sub, name, reload) {
 const cancelRequest = (sub, after) => h("button", { class: "ghost danger", type: "button", onclick: act(async () => {
   if (!confirm("ยกเลิกงาน “" + sub.title + "” ? ข้อมูลที่กรอกไว้จะถูกลบ")) return;
   await api("/submissions/" + sub.id, { method: "DELETE" });
-  after();
+  await after();
 }) }, "ยกเลิกงานนี้");
 
 // one request, with its form(s): opened from the home list
@@ -158,7 +173,7 @@ function subCard(sub) {
     step ? h("div", {}, h("h3", {}, "เอกสารสำหรับขั้นตอนนี้"),
       step.documents.length ? step.documents.map((name) => docRow(sub, name, () => researcherHome().catch(fail))) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
       : h("p", {}, "ดำเนินการเสร็จสิ้น"),
-    sub.current_step >= sub.step_count ? null : h("div", { class: "actions end" }, cancelRequest(sub, () => { openReq = null; researcherHome().catch(fail); })));
+    sub.current_step >= sub.step_count ? null : h("div", { class: "actions end" }, cancelRequest(sub, () => { openReq = null; return researcherHome().catch(fail); })));
 }
 
 // ---------- researcher home: status cards, my requests, start a new one ----------
@@ -193,7 +208,7 @@ function myRequests(subs, draw) {
 // open types, grouped by category; with many categories the groups start closed and search opens the ones with a match
 function startList(posts, cats, subs) {
   const catName = new Map(cats.map((c) => [c.id, c.name]));
-  const groups = cats.map((c) => ({ id: c.id, name: c.name, types: posts.filter((p) => p.category_id === c.id) }))
+  const groups = [{ id: "pin", pin: true, name: "★ ปักหมุด", types: posts.filter((p) => p.pinned) }].concat(cats.map((c) => ({ id: c.id, name: c.name, types: posts.filter((p) => p.category_id === c.id) })))
     .concat([{ id: null, name: "อื่น ๆ", types: posts.filter((p) => p.category_id == null || !catName.has(p.category_id)) }]).filter((g) => g.types.length);
   const many = groups.length > 5, chips = groups.length > 6;
   let only = null;  // a chip that is switched on
@@ -202,16 +217,16 @@ function startList(posts, cats, subs) {
   const startOrContinue = (p) => {
     const mine = subs.find((s) => s.type_id === p.type_id);
     return mine ? h("button", { class: "ghost", type: "button", onclick: () => { openReq = mine.id; researcherHome().catch(fail); } }, "ต่องานของฉัน")
-      : h("button", { class: "primary", type: "button", onclick: act(async () => { openReq = (await api("/open-types/" + p.type_id + "/start", { method: "POST" })).id; researcherHome().catch(fail); }) }, "เริ่มส่ง");
+      : h("button", { class: "primary", type: "button", onclick: act(async () => { openReq = (await api("/open-types/" + p.type_id + "/start", { method: "POST" })).id; await researcherHome().catch(fail); }) }, "เริ่มส่ง");
   };
   const draw = () => {
     const q = find.value.trim().toLowerCase();
     chipBox.replaceChildren(...(chips && !q ? [h("button", { class: "hchip" + (only === null ? " on" : ""), type: "button", onclick: () => { only = null; draw(); } }, "ทั้งหมด"),
       ...groups.map((g, i) => h("button", { class: "hchip" + (only === i ? " on" : ""), type: "button", onclick: () => { only = only === i ? null : i; draw(); } }, g.name, h("small", {}, String(g.types.length))))] : []));
-    const shown = groups.map((g, i) => ({ g, i, types: q ? g.types.filter((p) => p.type_name.toLowerCase().includes(q)) : g.types })).filter((x) => x.types.length && (q || only === null || only === x.i));
+    const shown = groups.map((g, i) => ({ g, i, types: q ? g.types.filter((p) => p.type_name.toLowerCase().includes(q)) : g.types })).filter((x) => x.types.length && !(q && x.g.pin) && (q || only === null || only === x.i));  // search hides the pinned copy so a match never shows twice
     box.replaceChildren(...(shown.length ? shown.map(({ g, i, types }) => {
       const started = types.filter((p) => subs.some((s) => s.type_id === p.type_id)).length;
-      return h("details", { class: "hg", open: q || only === i || !many }, h("summary", {}, h("span", { class: "ch" }, "›"), h("b", {}, g.name),
+      return h("details", { class: "hg", open: q || only === i || !many || g.pin }, h("summary", {}, h("span", { class: "ch" }, "›"), h("b", {}, g.name),
         h("span", { class: "muted" }, q ? types.length + " จาก " + g.types.length : g.types.length + " ประเภท"), started ? h("span", { class: "hhit" }, "คุณเริ่มแล้ว " + started) : null),
         types.map((p) => h("div", { class: "hrow2" }, h("div", {}, h("b", {}, hl(p.type_name, q)),
           h("small", {}, p.steps.length + " ขั้นตอน · เอกสาร " + new Set(p.steps.flatMap((st) => st.documents)).size + " รายการ · ผู้รับผิดชอบ " + p.owner_name)), startOrContinue(p))));
@@ -247,6 +262,7 @@ async function researcherHome() {
 }
 
 // ---------- staff ----------
+let typeQ = "", typeCat = null;  // the type list's search text and category chip survive a redraw
 let tab = "queue", openType = null, openGroup = null;  // openType: the type whose page is open in the ประเภทงาน tab
 let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
 async function staffHome() {
@@ -256,9 +272,14 @@ async function staffHome() {
   const body = h("div", { class: "ws-main" });
   const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; openGroup = null; staffHome(); } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
+  const sk = h("div", { class: "sk-page", "aria-hidden": "true" }, h("span"), h("span"), h("span"), h("span"));
+  body.append(sk);
+  body.setAttribute("aria-busy", "true");
   show(h("div", { class: "ws" }, menu, body));
-  ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles })[tab](body).catch(fail);
+  await ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles })[tab](body).catch(fail).finally(() => { sk.remove(); body.removeAttribute("aria-busy"); });
 }
+// redraw after a change in place, keeping the scroll position (the page empties while it reloads)
+async function redraw() { const y = scrollY; await staffHome(); scrollTo(0, y); }
 
 async function staffFiles(body) {
   filesRoot ||= document.getElementById("files-root");
@@ -269,14 +290,8 @@ async function staffFiles(body) {
 }
 
 async function staffSubs(body, queue = []) {
-  const [subs, types] = await Promise.all([api("/submissions"), api("/types")]);
-  const approved = types.filter((t) => t.status === "approved");
-  const title = h("input", { type: "text", placeholder: "เช่น ขอเบิกค่าเดินทาง - นิดา" });
-  const type = h("select", { class: "field" }, approved.map((t) => h("option", { value: t.id }, t.type_name + " (v" + t.version + ")")));
-  const researchers = users.filter((u) => u.role === "researcher").map((u) => h("label", { class: "check" }, h("input", { type: "checkbox", value: u.id }), " " + u.name));
-  const staffSel = h("select", { class: "field" }, users.filter((u) => u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === me.id }, u.name)));
+  const subs = await api("/submissions");
   const nm = (id) => users.find((u) => u.id === id)?.name || id;
-  const lab = (text, el) => h("label", { class: "lbl" }, h("span", {}, text), el);
   const progress = (s) => {
     const done = s.current_step >= s.step_count, n = Math.min(s.current_step + 1, s.step_count);
     return h("span", { class: "prog" }, h("span", { class: "bar" }, h("i", { style: "width:" + Math.round(100 * (done ? s.step_count : s.current_step) / s.step_count) + "%" })),
@@ -313,21 +328,12 @@ async function staffSubs(body, queue = []) {
           h("span", { class: "muted block" }, mine.length + " งาน · กำลังดำเนินการ " + mine.filter((s) => s.current_step < s.step_count).length + " · เสร็จสิ้น " + mine.filter((s) => s.current_step >= s.step_count).length)),
         h("button", { class: "ghost", type: "button", onclick: () => { openGroup = id; draw(); } }, "เปิดดูงาน"));
     });
-    list.replaceChildren(...(groups.length ? groups : [h("p", { class: "muted" }, subs.length ? "ไม่พบงานที่ตรงกับตัวกรอง" : "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากงานที่เปิดรับงาน หรือสร้างให้ด้านล่าง")]));
+    list.replaceChildren(...(groups.length ? groups : [h("p", { class: "muted" }, subs.length ? "ไม่พบงานที่ตรงกับตัวกรอง" : "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากประเภทงานที่เปิดรับงาน (เลือกได้ว่าใครเห็น ในหน้าของแต่ละประเภทงาน)")]));
   };
   [find, status, who].forEach((el) => el.addEventListener(el === find ? "input" : "change", draw));
   draw();
   body.append(h("h1", { class: "page-title" }, "งานทั้งหมด"), count,
-    h("section", { class: "card" }, subs.length ? h("div", { class: "filters" }, find, status, who) : null, list),
-    h("section", { class: "card" }, h("h2", {}, "สร้างงานใหม่ให้นักวิจัย"), h("p", { class: "muted sub" }, "สร้างงานในนามนักวิจัยที่เลือก"),
-      approved.length ? h("div", { class: "newform" },
-        lab("ชื่องาน", title), lab("ประเภทงาน", type), lab("ผู้รับผิดชอบ", staffSel),
-        h("div", { class: "lbl wide" }, h("span", {}, "เลือกนักวิจัย"), h("div", { class: "checks" }, researchers)),
-        h("div", { class: "wide actions end" }, h("button", { class: "primary", type: "button", onclick: act(async () => {
-          const ids = [...body.querySelectorAll(".checks input:checked")].map((c) => c.value);
-          await api("/submissions", send("POST", { title: title.value.trim(), version_id: +type.value, researcher_ids: ids, staff_id: staffSel.value }));
-          staffHome();
-        }) }, "สร้างงาน"))) : h("p", { class: "muted" }, "ต้องมีประเภทงานที่อนุมัติแล้วก่อน (เมนู ประเภทงาน)")));
+    h("section", { class: "card" }, subs.length ? h("div", { class: "filters" }, find, status, who) : null, list));
 }
 
 // one document of a request, as staff see it: the researcher's view for the in-charge staff (who may fill it in), plus review once sent
@@ -343,10 +349,10 @@ async function staffDetail(sid) {
   const sub = await api("/submissions/" + sid);
   const mine = sub.staff_id === me.id;
   const nm = (id) => users.find((u) => u.id === id)?.name || id;
-  const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); staffDetail(sid); });
+  const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); await staffDetail(sid); });
   const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await api("/submissions/" + sid + "/staff", send("POST", { staff_id: ev.target.value })); staffDetail(sid); }) },
     users.filter((u) => u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === sub.staff_id }, "ผู้รับผิดชอบ " + u.name)));
-  show(h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"),
+  show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ")),
     h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · นักวิจัย " + sub.researcher_ids.map(nm).join(", ")), h("div", { class: "actions" }, owner, h("span", { class: "muted" }, "เปลี่ยนผู้รับผิดชอบได้ทุกคน เมื่อคนเดิมไม่อยู่")), stepper(sub),
       h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
@@ -369,7 +375,7 @@ function reviewBlock(u, mine, after) {
   const draw = () => list.replaceChildren(...u.findings.map((f, i) => findingItem(f, dismissed.has(i),
     h("input", { type: "checkbox", checked: dismissed.has(i), "aria-label": "ปัดตก", onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }))));
   draw();
-  const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); after(); });
+  const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); await after(); });
   return [u.findings.length ? h("p", { class: "fsum" }, "ข้อสังเกตจาก AI " + u.findings.length + " ข้อ · ติ๊กข้อที่ไม่ต้องสนใจเพื่อปัดตก") : null, list, note, h("div", { class: "actions" },
     h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
     h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
@@ -401,42 +407,82 @@ async function staffTypes(body) {
     if (!file) return;
     runProgress(ev.target, "AI กำลังร่างขั้นตอนจาก “" + file.name + "”", (say) => apiStream("/types", form({ name: name.value.trim(), file }), say), (out) => draftEditor(out.version_id), staffHome);
   } });
-  const counts = Object.fromEntries(await Promise.all(types.filter((t) => t.status === "approved").map(async (t) => {
-    const by = await formsByDoc(t), docs = docsOf(t);
-    return [t.id, docs.length ? "แบบฟอร์มพร้อมใช้งาน " + docs.filter((d) => by[d]?.status === "approved").length + "/" + docs.length : "ไม่มีเอกสาร"];
-  })));
+  const counts = Object.fromEntries(types.map((t) => [t.id, docsOf(t).length ? docsOf(t).length + " รายการ" : "ไม่มีเอกสาร"]));
   const cats = await api("/categories");
-  const row = (t) => h("div", { class: "list-row" },
-    h("span", { class: "grow" }, h("b", {}, t.type_name), " ", h("span", { class: "muted" }, "v" + t.version),
-      h("span", { class: "muted block" }, t.status === "draft" ? "ฉบับร่าง (ยังไม่ใช้งาน)" : t.steps.length + " ขั้นตอน · " + counts[t.id])),
-    t.status === "approved" && t.open ? h("span", { class: "badge ok" }, "เปิดรับงาน") : null,
-    t.status === "draft" ? h("span", { class: "tools" }, h("button", { class: "ghost danger", type: "button", onclick: removeButton("ลบฉบับร่าง “" + t.type_name + "”?", "/versions/" + t.id) }, "ลบ"),
-      h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจสอบและอนุมัติ"))
-      : h("button", { class: "ghost", type: "button", onclick: () => { openType = t.type_id; staffHome(); } }, "จัดการ"));
-  const known = new Set(cats.map((c) => c.id)), other = types.filter((t) => !known.has(t.category_id));
-  const groups = [...cats.map((c) => ({ name: c.name, items: types.filter((t) => t.category_id === c.id) })), ...(other.length ? [{ name: "อื่น ๆ", items: other }] : [])];
-  body.append(h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "จัดการขั้นตอน เอกสาร แบบฟอร์ม และสถานะการเปิดรับงานได้ในที่เดียว"),
-    groups.length ? groups.map((g) => h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, g.name), h("small", { class: "muted" }, g.items.length ? g.items.length + " ประเภท" : "ว่าง")),
-      g.items.length ? g.items.map(row) : h("p", { class: "muted" }, "ยังไม่มีประเภทงานในหมวดนี้")))
-      : h("section", { class: "card" }, h("p", { class: "muted" }, "ยังไม่มีประเภทงาน อัปโหลดคู่มือด้านล่างเพื่อเริ่ม")),
-    h("details", { class: "card fold", open: !types.length }, h("summary", {}, "+ สร้างประเภทงานใหม่"), h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI ช่วยร่างขั้นตอนและเอกสารที่ต้องส่ง เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งาน"), name,
-      h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารเพื่อให้ AI ร่างขั้นตอน"))),
-    categoryManager(cats));
+  const known = new Set(cats.map((c) => c.id)), catOf = new Map(cats.map((c) => [c.id, c.name]));
+  const done = (fn) => async (...a) => { try { await fn(...a); await redraw(); } catch (e) { fail(e); } };
+  const drag = {};  // the type_id being dragged onto a category chip
+  // only the grip starts a drag, so text in the row stays selectable
+  const row = (t) => {
+    const grip = h("span", { class: "grip", title: "ลากไปวางที่หมวดด้านบนเพื่อย้าย", onmousedown: () => { r.draggable = true; }, onmouseup: () => { r.draggable = false; } });
+    const pin = h("button", { class: "pin" + (t.pinned ? " on" : ""), type: "button", "aria-pressed": String(!!t.pinned), title: t.pinned ? "เลิกปักหมุด" : "ปักหมุด (แสดงก่อนใคร ๆ ทั้งฝั่งเจ้าหน้าที่และนักวิจัย)",
+      onclick: () => {  // the star flips at once; a failed save flips it back
+      const flip = () => { pin.classList.toggle("on"); pin.setAttribute("aria-pressed", String(pin.classList.contains("on"))); };
+      flip();
+      api("/types/" + t.type_id + "/pin", send("PUT", { pinned: !t.pinned })).then(redraw, (e) => { flip(); fail(e); });
+    } }, "★");
+    const r = h("div", { class: "trow" },
+      h("span", { class: "tname" }, grip, pin, h("b", {}, t.type_name), catOf.has(t.category_id) ? h("small", { class: "tag" }, catOf.get(t.category_id)) : null),
+      h("span", { class: "muted" }, t.status === "draft" ? "–" : t.steps.length),
+      h("span", { class: "muted" }, counts[t.id]),
+      t.status === "draft" ? h("span", { class: "badge warn" }, "ฉบับร่าง") : t.open ? h("span", { class: "badge ok", title: t.audience ? "เฉพาะ " + t.audience.map((id) => users.find((u) => u.id === id)?.name || id).join(", ") : null }, t.audience ? "เปิดรับ · " + t.audience.length + " คน" : "เปิดรับงาน") : h("span", { class: "badge" }, "ปิดรับงาน"),
+      t.status === "draft" ? h("span", { class: "tools" }, h("button", { class: "ghost danger", type: "button", onclick: removeButton("ลบฉบับร่าง “" + t.type_name + "”?", "/versions/" + t.id) }, "ลบ"),
+        h("button", { class: "primary", type: "button", onclick: () => draftEditor(t.id) }, "ตรวจสอบและอนุมัติ"))
+        : h("button", { class: "ghost", type: "button", onclick: () => { openType = t.type_id; staffHome(); } }, "จัดการ"));
+    r.addEventListener("dragstart", (ev) => { drag.type = t.type_id; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", ""); r.classList.add("dragging"); });
+    r.addEventListener("dragend", () => { r.draggable = false; r.classList.remove("dragging"); delete drag.type; });
+    return r;
+  };
+  const head = h("div", { class: "trow head" }, h("span", {}, "ชื่อประเภท"), h("span", {}, "ขั้นตอน"), h("span", {}, "เอกสารที่ต้องส่ง"), h("span", {}, "สถานะ"), h("span"));
+  const moveType = done((tid, cid) => api("/types/" + tid + "/category", send("PUT", { category_id: cid })));
+  const find = h("input", { type: "search", class: "hsearch", value: typeQ, placeholder: "ค้นหาประเภทงาน", "aria-label": "ค้นหาประเภทงาน" });
+  const chipBox = h("div", { class: "hchips" }), list = h("div");
+  // the name of a chip turns into an input: Enter saves, Esc or leaving the box cancels
+  const edit = (label, start, save, cls = "") => {
+    const box = h("input", { type: "text", class: "chipin " + cls, value: start, "aria-label": "ชื่อหมวด", placeholder: "ชื่อหมวดใหม่" });
+    box.addEventListener("keydown", act(async (e) => {
+      if (e.key === "Escape") box.replaceWith(label);
+      else if (e.key === "Enter") { if (box.value.trim() && box.value !== start) { await save(box.value); await redraw(); } else box.replaceWith(label); }
+    }));
+    box.addEventListener("blur", () => { if (box.isConnected) box.replaceWith(label); });
+    label.replaceWith(box); box.focus(); box.select();
+  };
+  const chip = (key, name, n, c) => {  // c = the category (null for ทั้งหมด and อื่น ๆ); chips are also drop targets for a dragged type
+    const label = h("button", { class: "hchip" + (typeCat === key ? " on" : ""), type: "button", onclick: () => { typeCat = typeCat === key && key !== null ? null : key; draw(); } }, name, h("small", {}, String(n)));
+    const el = h("span", { class: "chipwrap" }, label,
+      c ? h("button", { class: "lk", type: "button", title: "แก้ชื่อหมวด", "aria-label": "แก้ชื่อหมวด", onclick: () => edit(label, c.name, (v) => api("/categories/" + c.id, send("PUT", { name: v }))) }, "✎") : null,
+      c && !n && !c.types ? h("button", { class: "lk danger", type: "button", title: "ลบหมวดว่าง", "aria-label": "ลบหมวดว่าง", onclick: () => { if (confirm("ลบหมวด “" + c.name + "” ?")) done(() => api("/categories/" + c.id, { method: "DELETE" }))(); } }, "✕") : null);
+    if (key !== null) {
+      el.addEventListener("dragover", (ev) => { if (drag.type !== undefined) { ev.preventDefault(); el.classList.add("over"); } });
+      el.addEventListener("dragleave", () => el.classList.remove("over"));
+      el.addEventListener("drop", (ev) => { ev.preventDefault(); el.classList.remove("over"); moveType(drag.type, key === "none" ? null : key); });
+    }
+    return el;
+  };
+  const addCat = h("button", { class: "hchip add", type: "button", onclick: () => edit(addCat, "", (v) => api("/categories", send("POST", { name: v })), "new") }, "+ หมวดหมู่ใหม่");
+  const draw = () => {
+    typeQ = find.value;
+    const q = typeQ.trim().toLowerCase(), none = types.filter((t) => !known.has(t.category_id)).length;
+    chipBox.replaceChildren(chip(null, "ทั้งหมด", types.length, null), ...cats.map((c) => chip(c.id, c.name, types.filter((t) => t.category_id === c.id).length, c)),
+      ...(none && cats.length ? [chip("none", "อื่น ๆ", none, null)] : []), addCat);
+    const shown = types.filter((t) => (!q || t.type_name.toLowerCase().includes(q)) && (typeCat === null || (typeCat === "none" ? !known.has(t.category_id) : t.category_id === typeCat)))
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    list.replaceChildren(shown.length ? h("section", { class: "card" }, head, shown.map(row)) : h("p", { class: "muted pad" }, types.length ? "ไม่พบประเภทงานที่ตรงกัน" : "ยังไม่มีประเภทงาน กด “+ สร้างประเภทงานใหม่” เพื่อเริ่ม"));
+  };
+  find.addEventListener("input", draw);
+  const create = modal("สร้างประเภทงานใหม่", null, h("p", { class: "muted" }, "อัปโหลดคู่มือหรือประกาศของงานนั้น (ทุน เบิกจ่าย ขออนุมัติ ฯลฯ) แล้ว AI ช่วยร่างขั้นตอนและเอกสารที่ต้องส่ง เจ้าหน้าที่ตรวจสอบและแก้ไขก่อนเปิดใช้งาน"), name,
+    h("div", { class: "actions" }, pick, h("button", { class: "primary", type: "button", onclick: () => pick.click() }, "อัปโหลดเอกสารเพื่อให้ AI ร่างขั้นตอน")));
+  body.append(h("div", { class: "between head-row" }, h("div", {}, h("h1", { class: "page-title" }, "ประเภทงาน"), h("p", { class: "muted sub" }, "จัดการขั้นตอน เอกสาร แบบฟอร์ม และสถานะการเปิดรับงานได้ในที่เดียว")),
+      h("button", { class: "primary", type: "button", onclick: () => create.showModal() }, "+ สร้างประเภทงานใหม่")),
+    find, chipBox, list, create);
+  draw();
 }
 
-// the list of categories researchers see types grouped under: add, rename, reorder, delete (only when empty)
-let catsOpen = false;  // the manager stays open while the page redraws after each change
-function categoryManager(cats) {
-  const newName = h("input", { type: "text", placeholder: "ชื่อหมวดใหม่", "aria-label": "ชื่อหมวดใหม่" });
-  const after = () => staffHome();
-  const order = (i, d) => act(async () => { const ids = cats.map((c) => c.id); [ids[i], ids[i + d]] = [ids[i + d], ids[i]]; await api("/categories/order", send("PUT", { ids })); after(); });
-  const lk = (text, onclick, disabled = false, cls = "") => h("button", { class: "lk " + cls, type: "button", disabled, onclick }, text);
-  return h("details", { class: "card fold", open: catsOpen, ontoggle: (ev) => { catsOpen = ev.target.open; } }, h("summary", {}, "จัดการหมวดหมู่ (" + cats.length + ")"), h("p", { class: "muted sub" }, "นักวิจัยเห็นประเภทงานแยกตามหมวดหมู่ ลำดับด้านล่างคือลำดับที่นักวิจัยเห็น"),
-    cats.length ? cats.map((c, i) => h("div", { class: "crow" }, h("span", {}, c.name), h("small", { class: "muted" }, c.types ? c.types + " ประเภท" : "ว่าง"),
-      h("span", { class: "tools" }, lk("↑", order(i, -1), i === 0), lk("↓", order(i, 1), i === cats.length - 1),
-        lk("แก้ชื่อ", act(async () => { const n = prompt("ชื่อหมวดใหม่", c.name); if (n && n.trim()) { await api("/categories/" + c.id, send("PUT", { name: n })); after(); } })),
-        lk("ลบ", act(async () => { if (confirm("ลบหมวด “" + c.name + "” ?")) { await api("/categories/" + c.id, { method: "DELETE" }); after(); } }), c.types > 0, "danger")))) : h("p", { class: "muted" }, "ยังไม่มีหมวดหมู่ ประเภทงานทั้งหมดจะอยู่ในกลุ่ม “อื่น ๆ”"),
-    h("div", { class: "actions" }, newName, h("button", { class: "primary", type: "button", onclick: act(async () => { if (newName.value.trim()) { await api("/categories", send("POST", { name: newName.value })); after(); } }) }, "เพิ่ม")));
+// popup: x button, Esc and a click on the backdrop close it; kids go inside a .card so runProgress can take the popup over
+function modal(title, onclose, ...kids) {
+  const d = h("dialog", { class: "dlg", onclose, onclick: (ev) => { if (ev.target === d) d.close(); } },
+    h("div", { class: "card" }, h("div", { class: "between" }, h("h2", {}, title), h("button", { class: "ghost", type: "button", "aria-label": "ปิด", onclick: () => d.close() }, "✕")), kids.flat()));
+  return d;
 }
 
 // delete with a confirm; the server refuses (and says why) when requests already use it
@@ -448,8 +494,25 @@ const removeButton = (question, path, done = () => staffHome()) => act(async () 
 });
 
 // one page per type: steps and documents, forms, and the post (open for researchers)
+// the type's name: click it (or the pencil) to edit in place, Enter saves, Esc or leaving the box cancels
+function typeTitle(t) {
+  const pen = h("button", { class: "editbtn", type: "button", "aria-label": "แก้ชื่อประเภทงาน" }, "✎ แก้ชื่อ");  // always visible, so nobody has to discover that the title is editable
+  const title = h("h1", { class: "page-title editable", title: "คลิกเพื่อแก้ชื่อ" }, t.type_name, pen);
+  title.addEventListener("click", () => {
+    const box = h("input", { type: "text", class: "titlein", value: t.type_name, "aria-label": "ชื่อประเภทงาน" });
+    const edit = h("div", { class: "titleedit" }, box, h("small", { class: "muted" }, "Enter บันทึก · Esc ยกเลิก"));
+    const cancel = () => { edit.replaceWith(title); pen.focus(); };
+    box.addEventListener("keydown", act(async (e) => {
+      if (e.key === "Escape") cancel();
+      else if (e.key === "Enter") { if (box.value.trim() && box.value !== t.type_name) { await api("/types/" + t.type_id + "/name", send("PUT", { name: box.value })); staffHome(); } else cancel(); }
+    }));
+    box.addEventListener("blur", () => { if (edit.isConnected) edit.replaceWith(title); });
+    title.replaceWith(edit); box.focus(); box.select();
+  });
+  return title;
+}
 async function typePage(body, t) {
-  const steps = h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, "ขั้นตอนและเอกสาร"), newVersionButton(t)),
+  const steps = h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, "ขั้นตอนและเอกสาร"), h("span", { class: "tools" }, h("button", { class: "ghost", type: "button", onclick: () => draftEditor(t.id, () => { tab = "types"; staffHome(); }) }, "แก้ไข"), newVersionButton(t))),
     h("ol", { class: "steplist" }, t.steps.map((s) => h("li", {}, h("b", {}, s.title), h("span", { class: "muted block" }, s.documents.length ? "เอกสาร: " + s.documents.join(", ") : "ไม่ต้องส่งเอกสาร")))));
   const cats = await api("/categories");
   const setCat = act(async (ev) => {
@@ -465,9 +528,9 @@ async function typePage(body, t) {
   const category = h("section", { class: "card" }, h("h2", {}, "หมวดหมู่"), h("p", { class: "muted sub" }, "นักวิจัยเห็นประเภทงานนี้ในหมวดที่เลือก การเปลี่ยนหมวดไม่กระทบงานที่เริ่มไปแล้ว"),
     h("select", { class: "field", "aria-label": "หมวดหมู่", onchange: setCat }, h("option", { value: "" }, "ไม่มีหมวด (อยู่ในกลุ่ม อื่น ๆ)"),
       cats.map((c) => h("option", { value: c.id, selected: c.id === t.category_id }, c.name)), h("option", { value: "new" }, "+ สร้างหมวดใหม่…")));
-  const post = h("section", { class: "card" }, h("h2", {}, "เปิดรับงาน"), h("p", { class: "muted sub" }, "เมื่อเปิดรับงาน นักวิจัยทุกคนเห็นงานนี้และกดเริ่มส่งเองได้ ผู้รับผิดชอบคือเจ้าหน้าที่ที่เลือก"), postControls(t));
+  const post = h("section", { class: "card" }, h("h2", {}, "เปิดรับงาน"), h("p", { class: "muted sub" }, "เมื่อเปิดรับงาน นักวิจัยที่เห็นงานนี้กดเริ่มส่งเองได้ ผู้รับผิดชอบคือเจ้าหน้าที่ที่เลือก"), postControls(t), audienceControls(t));
   body.append(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: () => { openType = null; staffHome(); } }, "← ประเภทงานทั้งหมด")),
-    h("h1", { class: "page-title" }, t.type_name), h("p", { class: "muted sub" }, "v" + t.version + " · ใช้งานอยู่"), steps, await formsSection(t), category, post,
+    typeTitle(t), steps, category, post,
     h("section", { class: "card" }, h("h2", {}, "ลบประเภทงาน"), h("p", { class: "muted sub" }, "ลบขั้นตอน แบบฟอร์ม และทุกเวอร์ชันของประเภทงานนี้ ทำได้เมื่อยังไม่มีนักวิจัยเริ่มส่งงาน"),
       h("button", { class: "ghost danger", type: "button", onclick: removeButton("ลบประเภทงาน “" + t.type_name + "” ทั้งหมด? ย้อนกลับไม่ได้", "/types/" + t.type_id) }, "ลบประเภทงานนี้")));
 }
@@ -483,6 +546,24 @@ function postControls(t) {
     : h("button", { class: "ghost", type: "button", onclick: act(async () => { await publish(); staffHome(); }) }, "เปิดรับงาน");
 }
 
+// who sees the post: every researcher, or only the ticked ones (PUT /types/{id}/audience); each change saves at once
+function audienceControls(t) {
+  const chosen = new Set(t.audience || []);
+  const save = (ids) => api("/types/" + t.type_id + "/audience", send("PUT", { user_ids: ids }));
+  const hint = h("p", { class: "muted", hidden: true }, "ยังเห็นได้ทุกคน จนกว่าจะติ๊กอย่างน้อยหนึ่งชื่อ");
+  const picks = h("div", { class: "checks", hidden: !t.audience }, users.filter((u) => u.role === "researcher").map((u) => h("label", { class: "check" },
+    h("input", { type: "checkbox", checked: chosen.has(u.id), onchange: act(async (ev) => {
+      ev.target.checked ? chosen.add(u.id) : chosen.delete(u.id);
+      if (!chosen.size) { ev.target.checked = true; chosen.add(u.id); toast("ต้องเลือกอย่างน้อยหนึ่งคน หรือเลือก “นักวิจัยทุกคน”"); return; }
+      await save([...chosen]); hint.hidden = true;
+    }) }), " " + u.name)));
+  const mode = (all) => h("label", { class: "check" }, h("input", { type: "radio", name: "aud" + t.type_id, checked: all === !t.audience, onchange: act(async () => {
+    if (all) { await save(null); chosen.clear(); picks.querySelectorAll("input").forEach((c) => { c.checked = false; }); }
+    picks.hidden = all; hint.hidden = all || chosen.size > 0;
+  }) }), all ? " นักวิจัยทุกคน" : " เฉพาะคนที่เลือก");
+  return h("div", { class: "audience" }, h("h3", {}, "ใครเห็นงานนี้"), h("div", { class: "checks" }, mode(true), mode(false)), picks, hint);
+}
+
 function newVersionButton(t) {
   const pick = h("input", { type: "file", accept: ".pdf,.docx", hidden: true, onchange: (ev) => {
     const file = ev.target.files[0];
@@ -492,34 +573,47 @@ function newVersionButton(t) {
   return h("span", {}, pick, h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, "อัปโหลดเวอร์ชันใหม่"));
 }
 
-async function draftEditor(vid) {
+async function draftEditor(vid, back = staffHome) {
   const v = (await api("/types")).find((t) => t.id === vid);
   let steps = v.steps.map((s) => ({ ...s }));
-  const box = h("div");
+  const live = v.status === "approved", box = h("div");
   const draw = () => box.replaceChildren(...steps.map((s, i) => {
     const title = h("input", { type: "text", value: s.title, oninput: (e) => { s.title = e.target.value; } });
-    const docs = h("textarea", { rows: 2, placeholder: "เอกสารที่ต้องเตรียม (บรรทัดละหนึ่งรายการ)", oninput: (e) => { s.documents = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); } }, s.documents.join("\n"));
+    const docs = h("textarea", { rows: 2, oninput: (e) => { s.documents = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); } }, s.documents.join("\n"));
     return h("div", { class: "stepedit" + (s.unsure ? " unsure" : "") },
-      h("b", {}, "ขั้นที่ " + (i + 1)), s.unsure ? h("span", { class: "warn" }, "AI ไม่แน่ใจ ตรวจสอบก่อนอนุมัติ") : null,
-      s.page ? h("span", { class: "muted" }, "มาจากหน้า " + s.page + " ของเอกสาร") : null, title, docs,
-      h("button", { class: "ghost danger", type: "button", onclick: () => { steps.splice(i, 1); draw(); } }, "ลบขั้นตอนนี้"));
+      h("div", { class: "between" }, h("span", {}, h("b", {}, "ขั้นที่ " + (i + 1)), s.unsure ? h("span", { class: "warn" }, "AI ไม่แน่ใจ ตรวจสอบก่อนอนุมัติ") : null,
+        s.page && !live ? h("span", { class: "muted" }, " มาจากหน้า " + s.page + " ของเอกสาร") : null),
+        h("button", { class: "lk danger", type: "button", onclick: () => { steps.splice(i, 1); draw(); } }, "ลบ")),
+      h("label", {}, h("span", { class: "muted" }, "ชื่อขั้นตอน"), title),
+      h("label", {}, h("span", { class: "muted" }, "เอกสารที่ต้องส่ง (บรรทัดละหนึ่งรายการ ไม่มีเอกสารให้เว้นว่าง)"), docs));
   }));
   draw();
   const save = () => api("/versions/" + vid, send("PUT", { steps: steps.filter((s) => s.title.trim()) }));
-  show(h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ"),
-    h("section", { class: "card" }, h("h2", {}, v.type_name + " v" + v.version + " (ฉบับร่าง)"),
-      h("p", { class: "muted" }, "ยังไม่ใช้งานจริงจนกว่าจะกดอนุมัติ"), box,
+  show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: back }, "← กลับ")),
+    h("section", { class: "card" }, h("h2", {}, v.type_name + (live ? "" : " (ฉบับร่าง)")),
+      h("p", { class: "muted" }, live ? "แก้ข้อความที่ AI เขียนผิดได้ทันที ถ้ามีนักวิจัยเริ่มส่งงานแล้ว เพิ่มหรือลบขั้นตอนไม่ได้" : "ยังไม่ใช้งานจริงจนกว่าจะกดอนุมัติ"), box,
       h("div", { class: "actions" },
         h("button", { class: "ghost", type: "button", onclick: () => { steps.push({ title: "", documents: [], page: null, unsure: false }); draw(); } }, "+ เพิ่มขั้นตอน"),
-        h("button", { class: "ghost", type: "button", onclick: (ev) => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) runProgress(ev.target, "AI กำลังร่างขั้นตอนใหม่", (say) => apiStream("/versions/" + vid + "/redraft", { method: "POST" }, say), () => draftEditor(vid), () => draftEditor(vid)); } }, "ให้ AI ร่างใหม่"),
-        h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); await api("/versions/" + vid + "/approve", { method: "POST" }); tab = "types"; staffHome(); }) }, "อนุมัติและเริ่มใช้งาน"))));
+        live ? null : h("button", { class: "ghost", type: "button", onclick: (ev) => { if (confirm("ให้ AI ร่างใหม่? การแก้ไขที่ยังไม่บันทึกจะหายไป")) runProgress(ev.target, "AI กำลังร่างขั้นตอนใหม่", (say) => apiStream("/versions/" + vid + "/redraft", { method: "POST" }, say), () => draftEditor(vid), () => draftEditor(vid)); } }, "ให้ AI ร่างใหม่"),
+        live ? h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); back(); }) }, "บันทึก")
+          : h("button", { class: "primary", type: "button", onclick: act(async () => { await save(); await api("/versions/" + vid + "/approve", { method: "POST" }); tab = "types"; staffHome(); }) }, "อนุมัติและเริ่มใช้งาน"))));
 }
 
 // ---------- chat drawer (researchers) ----------
 // The old chat page, embedded: no chat code is copied and its history keeps working.
 const removeChat = () => document.querySelectorAll("#chat-drawer, #chat-fab").forEach((e) => e.remove());
-// one Escape listener for the page, not one per login
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") document.querySelector("#chat-drawer:not([hidden]) .chat-head button")?.click(); });
+// one Escape listener for the page, not one per login: closes the notification list first, then the chat drawer
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  const notes = document.getElementById("notes");
+  if (!notes.hidden) { notes.hidden = true; document.getElementById("bell").setAttribute("aria-expanded", "false"); document.getElementById("bell").focus(); return; }
+  document.querySelector("#chat-drawer:not([hidden]) .chat-head button")?.click();
+});
+// a click anywhere outside the notification list closes it
+document.addEventListener("click", (ev) => {
+  const notes = document.getElementById("notes");
+  if (!notes.hidden && !ev.target.closest("#notes, #bell")) { notes.hidden = true; document.getElementById("bell").setAttribute("aria-expanded", "false"); }
+});
 
 function chatDrawer() {
   removeChat();  // two overlapping logins must not leave two drawers
@@ -531,6 +625,7 @@ function chatDrawer() {
     panel.hidden = !open;
     fab.hidden = open;
     if (open && !frame.getAttribute("src")) frame.src = "/chat";  // loaded on first open, not at page load
+    (open ? panel.querySelector(".chat-head button") : fab).focus();  // keyboard users land inside the drawer, and back on the button when it closes
   }
   document.body.append(fab, panel);
 }
@@ -544,17 +639,36 @@ function mountBell() {
   if (!me) return;
   const count = (k) => { n.hidden = !k; n.textContent = String(k); document.title = (k ? "(" + k + ") " : "") + "RiSA"; };
   const refresh = () => api("/notifications").then((r) => count(r.unread)).catch(() => {});
-  const go = (sid) => { panel.hidden = true; if (me.role === "staff") staffDetail(sid).catch(fail); else { openReq = sid; researcherHome().catch(fail); } };
+  const go = (sid) => { panel.hidden = true; bell.setAttribute("aria-expanded", "false"); if (me.role === "staff") staffDetail(sid).catch(fail); else { openReq = sid; researcherHome().catch(fail); } };
+  const close = () => { panel.hidden = true; bell.setAttribute("aria-expanded", "false"); };
+  bell.setAttribute("aria-expanded", "false");
   bell.onclick = act(async () => {
-    if (!panel.hidden) { panel.hidden = true; return; }
+    if (!panel.hidden) { close(); return; }
     const r = await api("/notifications"), now = new Date().toISOString();
     panel.replaceChildren(...(r.items.length ? r.items.map((it) => h("button", { type: "button", class: it.seen ? "" : "new", onclick: () => go(it.submission_id) }, it.text, h("small", {}, agoText(it.created, now))))
       : [h("p", {}, "ยังไม่มีการแจ้งเตือน")]));
-    panel.hidden = false;
+    panel.hidden = false; bell.setAttribute("aria-expanded", "true");
     if (r.unread) { await api("/notifications/seen", { method: "POST" }); count(0); }  // read once the list is open
   });
   refresh();
   bellTimer = setInterval(refresh, 60000);
+}
+
+// ---------- LINE: a researcher links their LINE account by typing a one-time code into the LINE chat ----------
+async function mountLine() {
+  const btn = document.getElementById("linebtn");
+  btn.hidden = true;
+  if (!me || me.role !== "researcher") return;
+  const st = await api("/api/line/status").catch(() => null);
+  if (!st?.enabled) return;
+  btn.hidden = false;
+  btn.textContent = st.linked ? "LINE ✓" : "เชื่อม LINE";
+  btn.onclick = act(async () => {
+    const c = await api("/api/line/code", { method: "POST" });
+    const d = modal("เชื่อมบัญชี LINE", () => d.remove(), h("p", {}, "1. เพิ่มเพื่อน LINE ของ RiSA" + (st.bot_id ? " (" + st.bot_id + ")" : "")), h("p", {}, "2. พิมพ์รหัสนี้ส่งในแชทนั้น:"),
+      h("p", { class: "linecode" }, c.code), h("p", { class: "muted" }, "รหัสใช้ได้ " + c.minutes + " นาที ใช้ได้ครั้งเดียว · ยกเลิกการเชื่อมได้โดยพิมพ์ “ยกเลิกการเชื่อมต่อ” ใน LINE"));
+    document.body.append(d); d.showModal();
+  });
 }
 
 // ---------- start ----------
@@ -566,10 +680,11 @@ async function boot() {
   document.getElementById("who").replaceChildren(...(me ? [h("span", { class: "av" }, me.name[0].toUpperCase()), h("span", {}, me.name, h("small", {}, ROLE[me.role]))] : []));
   logout.hidden = !me;
   document.getElementById("chatlink").hidden = !me || me.role !== "researcher";  // staff do not use the chat
+  mountLine();
   mountBell();
   logout.onclick = async () => { await api("/logout", { method: "POST" }); start(); };
   if (!me) { tab = "queue"; return loginScreen(); }  // the next staff member starts on the inbox
-  users = await api("/mock-users");
+  users = await api("/users");
   await (me.role === "staff" ? staffHome : researcherHome)();
   if (me.role === "researcher") chatDrawer();
 }

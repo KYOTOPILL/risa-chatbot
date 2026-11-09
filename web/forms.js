@@ -31,7 +31,7 @@ function formFill(sub, name, def, up, reload) {
   const forget = () => { try { localStorage.removeItem(key); } catch { /* nothing to remove */ } };
   const save = (ev, draft) => {
     const missing = draft ? -1 : def.fields.findIndex((f, i) => f.required && (f.type === "file" ? !inputs[i].get() && !old[f.key] : !String(inputs[i].get()).trim()));
-    if (missing >= 0) { alert("กรุณากรอก: " + def.fields[missing].label); return; }  // before the progress panel: it would replace the form and lose what was typed
+    if (missing >= 0) { toast("กรุณากรอก: " + def.fields[missing].label); inputs[missing].querySelector?.("input, textarea, select")?.focus(); return; }  // before the progress panel: it would replace the form and lose what was typed
     const fd = new FormData(), answers = {};
     def.fields.forEach((f, i) => {
       const v = inputs[i].get();
