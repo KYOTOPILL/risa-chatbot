@@ -11,8 +11,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.core import state
-from app.core.auth import User, authenticate, current_user, login_allowed, login_failed, require_staff, session_value
-from app.core.config import COOKIE_SECURE, MAX_UPLOAD_BYTES, SESSION_TTL, UPLOAD_DIR
+from app.core.auth import User, authenticate, current_user, IP_MAX_FAILS, login_allowed, login_failed, require_staff, same_origin, session_value
+from app.core.config import COOKIE_SECURE, IDLE_SECONDS, MAX_UPLOAD_BYTES, UPLOAD_DIR
 from app.rag.extract import extract_pages, extract_text
 from app.rag.rag import chat as llm
 from app.features.forms_ai import draft_form
@@ -20,7 +20,7 @@ from app.features.steps_ai import draft_steps, screen_document
 from app.features import line_bot
 from app.features.tracker import ROLES, USER_VIEWS, allowed_exts
 
-router = APIRouter(prefix="/api/track")
+router = APIRouter(prefix="/api/track", dependencies=[Depends(same_origin)])
 
 
 class LoginIn(BaseModel):
@@ -51,8 +51,10 @@ class MoveIn(BaseModel):
 
 
 @router.get("/users")
-def users(_user: User = Depends(current_user)):
-    return state.get_tracker().list_users()
+def users(user: User = Depends(current_user)):
+    """Staff see everyone. A researcher only needs the staff (names on their requests), so they never get the directory of other researchers."""
+    everyone = state.get_tracker().list_users()
+    return everyone if user.role == "staff" else [u for u in everyone if u["role"] == "staff"]
 
 
 class RoleIn(BaseModel):
@@ -75,6 +77,12 @@ def _people_text(text: str) -> str:
     return text
 
 
+@router.get("/users/events")
+def users_events(offset: int = 0, limit: int = 50, _user: User = Depends(require_staff)):
+    """Who added, promoted, demoted, disabled or re-enabled whom, newest first."""
+    return state.get_tracker().user_events(max(offset, 0), min(max(limit, 1), 100))
+
+
 @router.get("/users/page")
 def users_page(q: str = "", view: str = "", offset: int = 0, limit: int = 50, _user: User = Depends(require_staff)):
     """The access list, one page at a time (it can hold thousands of people)."""
@@ -91,12 +99,16 @@ def preview_users(body: AddUsersIn, _user: User = Depends(require_staff)):
 
 
 @router.post("/users/add")
-def add_users(body: AddUsersIn, _user: User = Depends(require_staff)):
+def add_users(body: AddUsersIn, user: User = Depends(require_staff)):
     """Give people access before they log in: only emails added here can log in. Existing people are left as they are."""
+    tk = state.get_tracker()
     try:
-        return state.get_tracker().add_people(_people_text(body.emails), body.role)
+        out = tk.add_people(_people_text(body.emails), body.role)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    for email in out["added"]:
+        tk.log_user_event(user.id, email, "add", body.role)
+    return out
 
 
 class ActiveIn(BaseModel):
@@ -117,6 +129,7 @@ def set_user_active(uid: str, body: ActiveIn, user: User = Depends(require_staff
         for line_id in tk.lines_for([uid]):
             line_bot._history.pop(line_id, None)
     tk.set_active(uid, body.active)
+    tk.log_user_event(user.id, uid, "enable" if body.active else "disable")
     return {"ok": True}
 
 
@@ -132,7 +145,10 @@ def set_user_role(uid: str, body: RoleIn, user: User = Depends(require_staff)):
         raise HTTPException(404, "not found")
     if body.role == "researcher" and (n := _unfinished(tk, uid)):  # a researcher cannot be the staff in charge: hand those requests over first
         raise HTTPException(409, f"ยังเป็นผู้รับผิดชอบงานที่ยังไม่เสร็จ {n} รายการ กรุณาเปลี่ยนผู้รับผิดชอบก่อน")
+    was = tk.role_of(uid)
     tk.set_role(uid, body.role)
+    if was != body.role:
+        tk.log_user_event(user.id, uid, "role", body.role)
     return tk.list_users()
 
 
@@ -142,22 +158,30 @@ def _role(uid: str) -> str | None:
 
 @router.post("/login")
 def login(body: LoginIn, request: Request, response: Response):
-    key = f"{request.client.host if request.client else ''}|{body.username.lower()}"
-    if not login_allowed(key):
+    ip = request.client.host if request.client else ""
+    key, any_name = f"{ip}|{body.username.lower()}", f"{ip}|*"  # one username is locked after 5 wrong tries, and one address after 30 across all names
+    if not (login_allowed(key) and login_allowed(any_name, IP_MAX_FAILS)):
         raise HTTPException(429, "too many wrong tries, wait a few minutes")
     uid = authenticate(body.username, body.password)
     if uid is None:
         login_failed(key)
+        login_failed(any_name)
         raise HTTPException(401, "wrong username or password")
-    user = state.get_tracker().get_user(uid, active_only=True)
-    if user is None:
+    row = state.get_tracker().login_row(uid)
+    if row is None:
         raise HTTPException(403, "บัญชีนี้ถูกปิดใช้งาน")
-    response.set_cookie("uid", session_value(uid), httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_TTL)
-    return user
+    response.set_cookie("uid", session_value(uid, row["session_epoch"]), httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=IDLE_SECONDS)
+    return {"id": row["id"], "name": row["name"], "role": row["role"]}
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response):
+    """Ends the session for good, on every device: the cookie is deleted here and the person's session number moves, so a copied cookie stops working."""
+    try:
+        state.get_tracker().end_sessions(current_user(request).id)
+    except HTTPException:
+        pass  # not logged in: nothing to end
+    request.state.new_session = None  # never answer a logout with a fresh cookie
     response.delete_cookie("uid")
     return {"ok": True}
 
@@ -399,22 +423,23 @@ def create_type(request: Request, name: str = Form(""), file: UploadFile | None 
 
 
 class PublishIn(BaseModel):
-    owner_id: str | None = None
+    owner_id: str | None = None  # one staff member, or
+    owner_ids: list[str] | None = None  # several: new requests rotate between them
 
 
 @router.post("/types/{type_id}/publish")
 def publish(type_id: int, body: PublishIn, user: User = Depends(require_staff)):
-    """Open a type for researchers. The owner (default: whoever publishes) is staff in charge of every request started from it."""
+    """Open a type for researchers. The staff set on it (default: whoever publishes) take its new requests in turn: each goes to the one with the fewest unfinished requests."""
     tk = state.get_tracker()
-    owner = body.owner_id or user.id
-    if _role(owner) != "staff":
+    owners = list(dict.fromkeys(body.owner_ids or ([body.owner_id] if body.owner_id else [user.id])))
+    if not owners or any(_role(o) != "staff" for o in owners):
         raise HTTPException(400, "the owner must be a staff member")
     if not any(v["type_id"] == type_id for v in tk.list_types()):
         if any(v["type_id"] == type_id for v in tk.list_drafts()):
             raise HTTPException(400, "approve the type first")
         raise HTTPException(404, "no such type")
-    tk.set_type_open(type_id, True, owner)
-    return {"ok": True, "owner_id": owner}
+    tk.set_type_open(type_id, True, owners)
+    return {"ok": True, "owner_id": owners[0], "owner_ids": owners}
 
 
 @router.post("/types/{type_id}/close")
@@ -532,7 +557,7 @@ def set_audience(type_id: int, body: AudienceIn, _: User = Depends(require_staff
 
 @router.get("/open-types")
 def open_types(user: User = Depends(current_user)):
-    return [{"type_id": v["type_id"], "type_name": v["type_name"], "category_id": v["category_id"], "pinned": bool(v["pinned"]), "owner_id": v["owner_id"], "owner_name": state.get_tracker().name_of(v["owner_id"]) if v["owner_id"] else "",
+    return [{"type_id": v["type_id"], "type_name": v["type_name"], "category_id": v["category_id"], "pinned": bool(v["pinned"]), "owner_id": v["owner_id"], "owner_ids": v["owner_ids"], "owner_name": ", ".join(state.get_tracker().name_of(o) for o in v["owner_ids"]),
              "steps": [{"title": st["title"], "documents": st["documents"]} for st in v["steps"]]} for v in state.get_tracker().list_open_types(None if user.role == "staff" else user.id)]
 
 
@@ -547,7 +572,7 @@ def start_request(type_id: int, user: User = Depends(current_user)):
     mine = next((s for s in tk.list_submissions(user.id, "researcher") if s["type_id"] == type_id), None)
     if mine:  # one request per post: go back to it and edit instead of starting a copy
         return {"id": mine["id"]}
-    return {"id": tk.create_submission(f"{v['type_name']} - {user.name}", v["id"], [user.id], v["owner_id"], user.id)}
+    return {"id": tk.create_submission(f"{v['type_name']} - {user.name}", v["id"], [user.id], tk.pick_owner(type_id), user.id)}
 
 
 @router.post("/types/{type_id}/versions")

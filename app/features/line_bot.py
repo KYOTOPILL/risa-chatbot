@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from app.core import config, state
-from app.core.auth import User, login_allowed, login_failed, require_researcher
+from app.core.auth import User, login_allowed, login_failed, require_researcher, same_origin
 from app.features import my_requests
 from app.rag import rag
 
@@ -23,6 +23,7 @@ log = logging.getLogger("chatbot")
 router = APIRouter(prefix="/api/line")
 
 CODE_MINUTES = 10
+ANY_SENDER_FAILS = 30  # wrong link codes from all LINE accounts together in 5 minutes
 LINK_HELP = "เปิดเว็บ RiSA แล้วกดปุ่ม “เชื่อม LINE” จากนั้นพิมพ์รหัส 6 หลักที่ได้ส่งมาที่นี่"
 WELCOME = "สวัสดีค่ะ นี่คือผู้ช่วย AI ของ RiSA ก่อนเริ่มใช้งาน กรุณาเชื่อมบัญชีนักวิจัยของคุณ: " + LINK_HELP
 LINKED_OK = "เชื่อมบัญชีเรียบร้อยแล้วค่ะ ถามได้เลย เช่น “ขอแบบฟอร์มใบลา” หรือ “งานของฉันตอนนี้ถึงขั้นไหน”"
@@ -89,11 +90,12 @@ def _files(reply: rag.Reply) -> str:
 
 def _link(sender: str, code: str) -> str:
     key = "line|" + sender
-    if not login_allowed(key):
+    if not (login_allowed(key) and login_allowed("line|*", ANY_SENDER_FAILS)):
         return LOCKED
     uid, exp = _codes.pop(code, (None, 0))
     if uid is None or exp < time.time():
         login_failed(key)
+        login_failed("line|*")  # many LINE accounts guessing in turn still share this cap
         return BAD_CODE
     state.get_tracker().link_line(sender, uid)
     return LINKED_OK
@@ -175,7 +177,7 @@ def status(user: User = Depends(require_researcher)):
     return {"enabled": bool(config.LINE_CHANNEL_SECRET), "linked": state.get_tracker().has_line(user.id), "bot_id": config.LINE_BOT_ID}
 
 
-@router.post("/code")
+@router.post("/code", dependencies=[Depends(same_origin)])
 def code(user: User = Depends(require_researcher)):
     """A one-time code the researcher types into the LINE chat to link that LINE account to this user."""
     now = time.time()
@@ -188,7 +190,7 @@ def code(user: User = Depends(require_researcher)):
     return {"code": c, "minutes": CODE_MINUTES}
 
 
-@router.post("/unlink")
+@router.post("/unlink", dependencies=[Depends(same_origin)])
 def unlink(user: User = Depends(require_researcher)):
     """Cut every LINE account linked to this user (the profile page button); linking again needs a new code."""
     tk = state.get_tracker()

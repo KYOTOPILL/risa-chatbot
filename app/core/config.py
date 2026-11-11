@@ -37,8 +37,10 @@ MOCK_USERS = {
     "s2": {"name": "Anan", "role": "staff", "username": "anan", "password": "anan123"},
 }
 for _uid, _u in MOCK_USERS.items():  # RISA_PASSWORD_S1=... replaces a demo password; set all four before anyone else can reach the app
+    _u["default"] = not os.environ.get(f"RISA_PASSWORD_{_uid.upper()}")  # still on the demo password from this file
     _u["password"] = os.environ.get(f"RISA_PASSWORD_{_uid.upper()}") or _u["password"]
-SESSION_TTL = 8 * 3600  # seconds a login lasts
+SESSION_TTL = 8 * 3600  # the longest a login can last, however active the person is
+IDLE_SECONDS = int(os.environ.get("RISA_IDLE_MINUTES", "30")) * 60  # logged out after this long without using the app
 # Dev only: RISA_DEV_LOGIN=you@cmu.ac.th:password lets that one email log in with that password until real CMU login exists. The person must still be
 # on the access list. Unset = off. Never set it on a server other people can reach.
 _dev = os.environ.get("RISA_DEV_LOGIN", "").strip()
@@ -52,6 +54,9 @@ STAFF_EMAILS = {e.strip().lower() for e in os.environ.get("RISA_STAFF_EMAILS", "
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 PUBLIC_URL = os.environ.get("RISA_PUBLIC_URL", "").rstrip("/")  # https address of this server: file links sent through LINE start with it
+# True when the app can be reached from outside this machine (a public address or HTTPS is configured): demo accounts still on their demo
+# password are then switched off, because that password is public (it is in this file on GitHub)
+EXPOSED = bool(PUBLIC_URL or COOKIE_SECURE)
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "")  # e.g. @123abcde, shown next to the link code on the web page
 TRACKER_DB = ROOT / "tracker.db"
 UPLOAD_DIR = ROOT / "uploads"

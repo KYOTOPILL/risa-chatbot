@@ -1,8 +1,10 @@
 :root {
-  --bg: #faf8f4; --panel: #ffffff; --text: #1d2a2a; --muted: #6b7777; --line: #e6e1d8;
+  /* --muted and --ok pass WCAG AA (4.5:1) as small text on --bg and on their own tints; the old #6b7777 / #16a34a measured 4.4 and 3.1 */
+  --bg: #faf8f4; --panel: #ffffff; --text: #1d2a2a; --muted: #5f6b6b; --line: #e6e1d8;
   --ink: #1d2a2a; --accent: #0f766e; --accent-ink: #ffffff; --bot: #ffffff; --user: #0f766e; --user-ink: #ffffff;
-  --err: #b42318; --err-bg: color-mix(in srgb, #b42318 8%, transparent); --warn: #b45309; --warn-bg: color-mix(in srgb, #f59e0b 12%, transparent); --ok: #16a34a;
+  --err: #b42318; --err-bg: color-mix(in srgb, #b42318 8%, transparent); --warn: #b45309; --warn-bg: color-mix(in srgb, #f59e0b 12%, transparent); --ok: #15803d;
   --radius: 12px;
+  --ease: cubic-bezier(.16, 1, .3, 1);  /* one easing for things that move in */
   --tint: color-mix(in srgb, var(--accent) 8%, transparent); --okbg: color-mix(in srgb, var(--ok) 13%, transparent);  /* used by home.css; were never defined */
   --font: "SF Pro Display", "Sukhumvit Set", "Leelawadee UI", "Noto Sans Thai", "Helvetica Neue", Tahoma, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
@@ -16,7 +18,8 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 16px/1.6 var(--font); font-variant-numeric: tabular-nums; }
-h1 { text-wrap: balance; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
 .app { max-width: 760px; height: 100dvh; margin: 0 auto; display: flex; flex-direction: column;
   padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px, env(safe-area-inset-left)); }
 
@@ -89,7 +92,7 @@ h1 { text-wrap: balance; }
 
 /* interruptible: transitions retarget mid-flight, keyframes would restart */
 @starting-style { .msg { opacity: 0; translate: 0 6px; } }
-button, .chip { transition: transform .15s, filter .15s, border-color .15s, color .15s; }
+button, .chip { transition: transform .15s, filter .15s, border-color .15s, color .15s, background-color .15s; }
 button:active:not(:disabled), .chip:active { transform: scale(.97); }
 
 /* bigger tap target without moving layout */
@@ -104,7 +107,7 @@ dialog[open] { transition: opacity .18s, translate .18s; }
 @starting-style { dialog[open] { opacity: 0; translate: 0 8px; } }
 dialog::backdrop { background: rgb(0 0 0 / .32); }
 
-@supports (corner-shape: squircle) { .msg, .fcard, .card, dialog, .primary, .composer textarea, #send { corner-shape: squircle; } }
+@supports (corner-shape: squircle) { .msg, .fcard, .card, dialog, .primary, .ghost, .composer textarea, #send, .card2, .stat, .hlist, .menu, .notes, .toast, .rv-card, .rv-list { corner-shape: squircle; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after { transition: none !important; }

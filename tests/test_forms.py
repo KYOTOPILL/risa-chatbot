@@ -330,6 +330,14 @@ def test_notifications_follow_send_review_and_reassign(env):
     assert any("ได้รับมอบหมาย" in t for t in _notes("s2")) and not any("ได้รับมอบหมาย" in t for t in _notes("s1"))
 
 
+def test_sent_documents_fold_into_one_unread_notification(env):
+    tk, sid, _, _ = env
+    for doc in ("A", "B", "C"):
+        tk.send_upload(tk.add_upload(sid, 0, doc, "x.pdf", "x", [], "screened"), "r1")
+    sent = [t for t in _notes("s1") if "รอตรวจสอบ" in t]
+    assert len(sent) == 1 and "3 เอกสาร" in sent[0]
+
+
 def test_notifications_unread_count_and_mark_seen_are_per_person(env):
     _, sid, _, _ = env
     r1, s1 = client("r1"), client("s1")

@@ -9,8 +9,8 @@ graphify-out/
 tracker.db
 uploads/
 .court/
+docs/
+evals/
 
-# content/: only the shareable folders are public; everything else stays local
-content/**
-!content/**/
-!content/**/shareable/**
+# content/: documents stay local, the app recreates the folder on first upload
+content/

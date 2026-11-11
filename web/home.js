@@ -1,5 +1,6 @@
 // Tracking dashboard. All text goes in through textContent (h helper): AI findings and staff-typed steps are never parsed as HTML.
 const app = document.getElementById("app");
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform);  // shortcut hints say ⌘ on Apple devices, Ctrl elsewhere
 let me = null;
 let users = [];
 
@@ -15,6 +16,14 @@ const h = (tag, props = {}, ...kids) => {
   return e;
 };
 
+// the server ends a session after 30 idle minutes (RISA_IDLE_MINUTES): the next request answers 401 and the page goes back to the login with a note
+let ending = false, loginNotice = "";
+function sessionEnded() {
+  if (ending) return;
+  ending = true; me = null; loginNotice = "หมดเวลาการใช้งาน กรุณาเข้าสู่ระบบอีกครั้ง";
+  start().finally(() => { ending = false; });
+}
+
 let inflight = 0;  // requests in flight: drives the thin loading bar at the top (home.css)
 const busy = (d) => document.documentElement.classList.toggle("loading", (inflight += d) > 0);
 async function api(path, opts = {}) {
@@ -22,7 +31,10 @@ async function api(path, opts = {}) {
   try {
     const r = await fetch(path.startsWith("/api/") ? path : "/api/track" + path, opts);  // a full /api/... path is used as it is (LINE lives at /api/line)
     const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : "ผิดพลาด (" + r.status + ")");
+    if (!r.ok) {
+      if (r.status === 401 && me && !path.endsWith("/login")) { sessionEnded(); throw new Error("หมดเวลาการใช้งาน"); }  // logged in a moment ago, so the session timed out
+      throw new Error(typeof body.detail === "string" ? body.detail : "ผิดพลาด (" + r.status + ")");
+    }
     return body;
   } finally { busy(-1); }
 }
@@ -89,13 +101,74 @@ const fmtLabel = (fmts) => fmts.map((f) => FORMATS.find((x) => x[0] === f)[1]).j
 const KIND = { missing: "ขาดหายไป", incorrect: "อาจไม่ถูกต้อง", unclear: "ไม่ชัดเจน" };
 const ROLE = { researcher: "นักวิจัย", staff: "เจ้าหน้าที่" };
 
-function show(...nodes) { app.replaceChildren(...nodes.flat().filter(Boolean)); }
+// A navigation (another page, tab or request) cross-fades, lets rows animate in and moves focus to the page title for screen readers.
+// An in-place redraw of the same page (after a save, a pin, a picked document) does none of that, so the page never flickers or steals focus.
+let pageKey = null, wantFocus = false, showSeq = 0;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+function landFocus() {
+  const t = wantFocus && (app.querySelector("[autofocus]") || app.querySelector("h1, h2, h3"));  // the first heading: request pages have no h1
+  if (!t) return;  // a staff tab draws its title after the skeleton: staffHome calls this again then
+  wantFocus = false;
+  if (/^H[1-3]$/.test(t.tagName)) t.tabIndex = -1;
+  t.focus({ preventScroll: true });
+}
+function show(...nodes) {
+  const key = [me?.id, location.pathname, tab, openReq, openType].join("|"), nav = key !== pageKey;
+  pageKey = key;
+  const id = ++showSeq;
+  const swap = () => { if (id !== showSeq) return; app.classList.toggle("nav", nav); app.replaceChildren(...nodes.flat().filter(Boolean)); if (nav) { wantFocus = true; landFocus(); } };
+  // the transition callback runs a frame later, so code after show() must not expect the new nodes in the page (login uses autofocus for that)
+  if (nav && app.childElementCount && document.startViewTransition && !reduceMotion.matches) document.startViewTransition(swap);
+  else swap();
+}
+// pages about one thing (a request, a type, the profile) use the reading width, left aligned; lists and tables use the wide column (.adm)
+function showRead(...nodes) { show(h("div", { class: "read" }, nodes.flat().filter(Boolean))); }
 // errors show in a toast (screen readers hear it via role=alert) instead of a blocking alert(); a click dismisses it
-const errBox = h("div", { class: "toast atoast", role: "alert", hidden: true, onclick: () => { errBox.hidden = true; } });
+// toast(text, undo): with an undo function it is a neutral note with an Undo button, and only that button acts on a click
+const errBox = h("div", { class: "toast atoast", role: "alert", hidden: true, onclick: () => { if (!errBox.classList.contains("undo-t")) errBox.hidden = true; } });
 document.body.append(errBox);
 let errTimer = null;
-function toast(text) { errBox.textContent = text; errBox.hidden = false; clearTimeout(errTimer); errTimer = setTimeout(() => { errBox.hidden = true; }, 6000); }
+let undoFn = null;  // the Undo of the toast on screen; Cmd/Ctrl+Z runs it too
+function toast(text, undo) {
+  undoFn = undo ? () => { undoFn = null; errBox.hidden = true; undo(); } : null;
+  errBox.replaceChildren(h("span", {}, text), undo ? h("button", { class: "link", type: "button", onclick: undoFn }, "เลิกทำ", h("kbd", {}, MAC ? "⌘Z" : "Ctrl Z")) : null);
+  errBox.classList.toggle("undo-t", !!undo);
+  errBox.hidden = false; clearTimeout(errTimer); errTimer = setTimeout(() => { errBox.hidden = true; undoFn = null; }, 6000);
+}
+// an Undo toast and its delete wait while the pointer or focus is on it (WCAG 2.2.1: enough time), and start a fresh 6 s after
+function holdToast(on) {
+  if (errBox.hidden || !errBox.classList.contains("undo-t")) return;
+  clearTimeout(errTimer); if (pendingDel) clearTimeout(pendingDel.timer);
+  if (on) return;
+  errTimer = setTimeout(() => { errBox.hidden = true; undoFn = null; }, 6000);
+  if (pendingDel) pendingDel.timer = setTimeout(commitDelete, 6000);
+}
+errBox.addEventListener("pointerenter", () => holdToast(true));
+errBox.addEventListener("pointerleave", () => holdToast(false));
+errBox.addEventListener("focusin", () => holdToast(true));
+errBox.addEventListener("focusout", () => holdToast(false));
 function fail(e) { toast(e.message); }
+
+// Deleting a request is optimistic: it leaves the page now and the DELETE waits 6 s so Undo can cancel it (the same pattern as files.js).
+// Lists drop a request that is waiting (gone(id)); leaving the page or logging out sends the DELETE at once.
+let pendingDel = null;
+const gone = (id) => pendingDel?.id === id;
+function deleteLater(id, text, restore) {
+  commitDelete();
+  pendingDel = { id, restore, timer: setTimeout(commitDelete, 6000) };
+  toast(text, () => { if (pendingDel?.id !== id) return; clearTimeout(pendingDel.timer); pendingDel = null; restore(); });
+}
+function commitDelete() {
+  if (!pendingDel) return;
+  const { id, restore, timer } = pendingDel;
+  clearTimeout(timer); pendingDel = null;
+  return api("/submissions/" + id, { method: "DELETE" }).catch((e) => { fail(e); restore(); });
+}
+addEventListener("pagehide", () => {
+  if (!pendingDel) return;
+  fetch("/api/track/submissions/" + pendingDel.id, { method: "DELETE", keepalive: true });
+  clearTimeout(pendingDel.timer); pendingDel = null;  // a page restored from the back/forward cache must not send it twice
+});
 // the clicked button stays disabled until its request settles, so a double click cannot send twice (two requests, two approvals)
 const act = (fn) => async (ev) => {
   const b = ev?.currentTarget instanceof HTMLButtonElement ? ev.currentTarget : null;
@@ -105,7 +178,7 @@ const act = (fn) => async (ev) => {
 
 // ---------- login ----------
 function loginScreen() {
-  const user = h("input", { type: "text", name: "username", autocomplete: "username", autocapitalize: "none", spellcheck: false, required: true });
+  const user = h("input", { type: "text", name: "username", autocomplete: "username", autocapitalize: "none", spellcheck: false, required: true, autofocus: true });
   const pass = h("input", { type: "password", name: "password", autocomplete: "current-password", required: true });
   const err = h("p", { class: "login-err", role: "alert", hidden: true });
   const submit = h("button", { class: "login-cta", type: "submit" }, "เข้าสู่ระบบ");
@@ -116,8 +189,9 @@ function loginScreen() {
     catch (e) { err.textContent = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"; err.hidden = false; pass.value = ""; pass.focus(); submit.disabled = false; }
   } },
     h("label", {}, "ชื่อผู้ใช้", user), h("label", {}, "รหัสผ่าน", pass), err, submit);
-  show(h("div", { class: "login" }, h("h1", {}, "เข้าสู่ระบบ"), h("p", { class: "muted" }, "ระบบจำลอง ภายหลังจะเปลี่ยนเป็นบัญชีอีเมล CMU"), form));
-  user.focus();
+  const note = loginNotice ? h("p", { class: "login-err", role: "status" }, loginNotice) : null;
+  loginNotice = "";
+  show(h("div", { class: "login" }, h("h1", {}, "เข้าสู่ระบบ"), h("p", { class: "muted" }, "ระบบจำลอง ภายหลังจะเปลี่ยนเป็นบัญชีอีเมล CMU"), note, form));  // show() focuses the autofocus field
 }
 
 // ---------- shared: stepper ----------
@@ -157,7 +231,7 @@ function docRow(sub, name, reload) {
   } });
   const sendBtn = canSend ? h("button", { class: "primary", type: "button", onclick: act(async () => { await api("/uploads/" + up.id + "/send", { method: "POST" }); await reload(); }) }, "ส่งให้เจ้าหน้าที่ตรวจสอบ") : null;
   const withdraw = up && up.status === "sent" ? h("button", { class: "ghost", type: "button", onclick: act(async () => { if (confirm("ถอนเอกสารนี้กลับมาแก้ไข? เจ้าหน้าที่จะไม่เห็นในคิวตรวจสอบจนกว่าจะส่งใหม่")) { await api("/uploads/" + up.id + "/withdraw", { method: "POST" }); await reload(); } }) }, "ถอนกลับมาแก้ไข") : null;
-  return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "muted" }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"), withdraw,
+  return h("div", { class: "doc" }, h("b", {}, def ? def.title : name), " ", up ? h("span", { class: "rv-st " + up.status }, STATUS[up.status]) : h("span", { class: "muted" }, "ยังไม่ได้ส่ง"), withdraw,
     up ? findings(up.findings) : null,
     up && up.status === "returned" ? h("p", { class: "err" }, "เจ้าหน้าที่ส่งกลับ: " + (up.note || "(ไม่มีหมายเหตุ)"))
       : up && up.note && !locked ? h("p", { class: "err" }, "หมายเหตุจากเจ้าหน้าที่ที่ส่งกลับ: " + up.note) : null,
@@ -166,9 +240,9 @@ function docRow(sub, name, reload) {
       : h("div", { class: "actions" }, pick, h("button", { class: "ghost", type: "button", onclick: () => pick.click() }, up ? "อัปโหลดใหม่" : "อัปโหลดไฟล์ (" + fmtLabel(fmts) + ")"), sendBtn));
 }
 
+// no confirm: the request leaves at once and the toast offers Undo for 6 s
 const cancelRequest = (sub, after) => h("button", { class: "ghost danger", type: "button", onclick: act(async () => {
-  if (!confirm("ยกเลิกงาน “" + sub.title + "” ? ข้อมูลที่กรอกไว้จะถูกลบ")) return;
-  await api("/submissions/" + sub.id, { method: "DELETE" });
+  deleteLater(sub.id, "ยกเลิกงาน “" + sub.title + "” แล้ว", () => { openReq = sub.id; researcherHome().catch(fail); });
   await after();
 }) }, "ยกเลิกงานนี้");
 
@@ -181,7 +255,7 @@ function subCard(sub) {
     step ? h("div", {}, h("h3", {}, "เอกสารสำหรับขั้นตอนนี้"),
       step.documents.length ? step.documents.map((name) => docRow(sub, name, () => researcherHome().catch(fail))) : h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร"))
       : h("p", {}, "ดำเนินการเสร็จสิ้น"),
-    sub.current_step >= sub.step_count ? null : h("div", { class: "actions end" }, cancelRequest(sub, () => { openReq = null; return researcherHome().catch(fail); })));
+    sub.current_step >= sub.step_count ? null : h("div", { class: "actions end" }, cancelRequest(sub, leaveMine)));
 }
 
 // ---------- researcher home: status cards, my requests, start a new one ----------
@@ -205,7 +279,7 @@ function myRequests(subs, draw) {
   return h("div", { class: "hlist" }, rows.length ? rows.map(({ s, bucket, item }) => {
     const n = Math.min(s.current_step + 1, s.step_count), pct = Math.round(100 * Math.min(s.current_step, s.step_count) / s.step_count);
     return h("div", { class: "hrow" },
-      h("div", {}, h("b", {}, s.title), item ? h("span", { class: "htag " + BUCKET_TAG[bucket] }, ITEM_TEXT(item)) : bucket === "done" ? h("span", { class: "htag t-ok" }, "เสร็จสิ้น") : null,
+      h("div", {}, h("b", {}, s.title), item ? h("span", { class: "htag " + (item.kind === "returned" ? "t-err" : BUCKET_TAG[bucket]) }, ITEM_TEXT(item)) : bucket === "done" ? h("span", { class: "htag t-ok" }, "เสร็จสิ้น") : null,
         h("small", {}, bucket === "done" ? "ดำเนินการเสร็จสิ้น" : "ขั้นที่ " + n + ": " + s.steps[s.current_step].title + (item ? " · " + item.doc + (item.kind === "returned" && item.note ? " · “" + item.note + "”" : "") : ""))),
       h("div", { class: "prog2" }, h("div", { class: "hbar" }, h("i", { style: "width:" + pct + "%" })), h("small", {}, bucket === "done" ? s.step_count + "/" + s.step_count : "ขั้นตอน " + n + "/" + s.step_count)),
       h("button", { class: bucket === "action" ? "primary" : "ghost", type: "button", onclick: () => { openReq = s.id; researcherHome().catch(fail); } },
@@ -245,14 +319,23 @@ function startList(posts, cats, subs) {
   return h("section", {}, h("h2", { class: "sech" }, "เริ่มงานใหม่"), posts.length > 3 ? find : null, chipBox, box);
 }
 
+// back from a researcher's request page: through the history when the page pushed an entry, so Back and this button agree
+function leaveMine() {
+  if (history.state?.open) return history.back();
+  openReq = null; researcherHome().catch(fail);
+}
 async function researcherHome() {
   if (openReq) {  // a request's own page: the form lives here
-    const sub = await api("/submissions/" + openReq).catch(() => null);
-    if (sub) return show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: () => { openReq = null; researcherHome().catch(fail); } }, "← งานของฉัน")), subCard(sub));
+    const sub = gone(openReq) ? null : await api("/submissions/" + openReq).catch(() => null);
+    if (sub) {
+      if (history.state?.open !== openReq) history.pushState({ open: openReq }, "");  // its own history entry: browser Back and the phone back gesture return to the list
+      return showRead(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: leaveMine }, "← งานของฉัน")), subCard(sub));
+    }
     openReq = null;  // cancelled or gone
+    if (history.state?.open) history.replaceState({}, "");
   }
   const [list, posts, cats] = await Promise.all([api("/submissions"), api("/open-types"), api("/categories")]);
-  const subs = await Promise.all(list.map((s) => api("/submissions/" + s.id)));
+  const subs = await Promise.all(list.filter((s) => !gone(s.id)).map((s) => api("/submissions/" + s.id)));
   const info = subs.map(bucketOf), counts = Object.fromEntries(BUCKETS.map(([k]) => [k, info.filter((i) => i.bucket === k).length]));
   const resume = info.find((i) => i.bucket === "action");  // what to continue first
   const cards = h("div", { class: "hcards" }), mine = h("div");
@@ -272,19 +355,41 @@ async function researcherHome() {
 // ---------- staff ----------
 let typeQ = "", typeCat = null;  // the type list's search text and category chip survive a redraw
 let tab = "queue", openType = null, openGroup = null;  // openType: the type whose page is open in the ประเภทงาน tab
+let queueAll = false;  // the review queue shows your own documents unless this is on
 let filesRoot = null, filesTab = null;  // the file manager: built once, kept in the page (hidden) while another tab shows
+// [key, icon, label]; null draws a divider. The Ctrl/Cmd+K palette lists the same tabs
+const STAFF_TABS = [["queue", "queue", "รอตรวจสอบ"], ["subs", "list", "งานทั้งหมด"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "คลังเอกสาร"], null, ["users", "users", "ผู้ใช้"]];
+let homeSeq = 0;
 async function staffHome() {
+  const mine = ++homeSeq;
   if (filesTab) { filesTab.close(); filesRoot.hidden = true; document.body.append(filesRoot); }
-  const [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
-  const items = [["queue", "queue", "รอตรวจสอบ", queue.length], ["subs", "list", "งานทั้งหมด"], null, ["types", "types", "ประเภทงาน"], ["files", "folder", "คลังเอกสาร"], null, ["users", "users", "ผู้ใช้"]];
+  let [queue, subs] = await Promise.all([api("/review-queue"), api("/submissions")]).catch((e) => { fail(e); return [[], []]; });
+  queue = queue.filter((u) => !gone(u.submission_id)); subs = subs.filter((s) => !gone(s.id));  // a delete waiting out its Undo
+  const items = STAFF_TABS.map((it) => it?.[0] === "queue" ? [...it, queue.filter((u) => u.staff_id === me.id).length] : it);
+  if (mine !== homeSeq) return;  // another tab was clicked meanwhile
   const body = h("div", { class: "ws-main" });
-  const menu = h("nav", { class: "ws-menu" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": String(it[0] === tab), onclick: () => { tab = it[0]; openType = null; openGroup = null; staffHome(); } },
+  const menu = h("nav", { class: "ws-menu", "aria-label": "เมนู" }, items.map((it) => !it ? h("div", { class: "sep" }) : h("button", { class: "navitem", type: "button", "aria-current": it[0] === tab ? "page" : null,
+    onclick: (ev) => {  // the clicked item lights up at once; the page follows when its data is in
+      menu.querySelectorAll(".navitem").forEach((b) => b.removeAttribute("aria-current")); ev.currentTarget.setAttribute("aria-current", "page");
+      goTab(it[0]);
+    } },
     icon(it[1]), it[2], it[3] ? h("span", { class: "n" }, String(it[3])) : null)));
+  // the tab draws off-page and replaces the old one when ready; the skeleton shows only if that takes longer than 150 ms,
+  // so a redraw after a save keeps the old content in place instead of flashing empty
+  const ws = h("div", { class: "ws" }, menu, body);
   const sk = h("div", { class: "sk-page", "aria-hidden": "true" }, h("span"), h("span"), h("span"), h("span"));
-  body.append(sk);
-  body.setAttribute("aria-busy", "true");
-  show(h("div", { class: "ws" }, menu, body));
-  await ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles, users: staffUsers })[tab](body).catch(fail).finally(() => { sk.remove(); body.removeAttribute("aria-busy"); });
+  let shown = false;
+  const slow = setTimeout(() => { if (mine !== homeSeq) return; shown = true; body.append(sk); body.setAttribute("aria-busy", "true"); show(ws); }, 150);
+  await ({ subs: (b) => staffSubs(b, queue), queue: (b) => staffQueue(b, queue, subs), types: staffTypes, files: staffFiles, users: staffUsers })[tab](body).catch(fail);
+  clearTimeout(slow); sk.remove(); body.removeAttribute("aria-busy");
+  if (mine !== homeSeq) return;
+  if (!shown) show(ws);
+  landFocus();
+}
+function goTab(k) {
+  if (location.pathname !== "/") history.pushState({}, "", "/");  // from a request page: the list gets its own address back
+  tab = k; openType = null; openGroup = null;
+  staffHome();
 }
 // redraw after a change in place, keeping the scroll position (the page empties while it reloads)
 async function redraw() { const y = scrollY; await staffHome(); scrollTo(0, y); }
@@ -327,27 +432,28 @@ async function staffUsers(body) {
     more.hidden = items.length >= total; more.textContent = "แสดงเพิ่ม (อีก " + (total - items.length) + " คน)"; more.onclick = () => load(false);
     note.textContent = items.length ? "แสดง " + items.length + " จาก " + total + " คน" : "";
   };
-  // add people: type an email and press Enter (or paste a list) and each becomes a chip; a chip shows its own state, the server says who exists already
+  // add people: type an email and press Enter (or paste a list) and each becomes a chip that says if it is correct, wrong or already there
   const addDialog = () => {
-    const EMAIL = /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/;
+    const EMAIL = /^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$/, CMU = /(^|\.)cmu\.ac\.th$/;
     let chips = [], seen = {}, seq = 0;  // seen: email -> what the server says (new, exists, disabled, invalid)
-    const kind = (e) => !EMAIL.test(e) || seen[e] === "invalid" ? "bad" : seen[e] === "exists" || seen[e] === "disabled" ? "have" : /(^|\.)cmu\.ac\.th$/.test(e.split("@")[1]) ? "ok" : "warn";
-    const TITLE = { bad: "อีเมลไม่ถูกต้อง", have: "มีอยู่แล้ว จะถูกข้าม", warn: "ไม่ใช่ @cmu.ac.th เข้าด้วยบัญชี CMU ไม่ได้", ok: "" };
-    const inp = h("input", { type: "text", "aria-label": "อีเมล", placeholder: "พิมพ์อีเมลแล้วกด Enter", autocomplete: "off", autocapitalize: "none", spellcheck: false });
+    // ok = will be added; bad = not an email or not a CMU address (it could never log in through CMU); have = already in the list
+    const kind = (e) => !EMAIL.test(e) || !CMU.test(e.split("@")[1]) || seen[e] === "invalid" ? "bad" : seen[e] === "exists" || seen[e] === "disabled" ? "have" : "ok";
+    const LABEL = { ok: ["✓", "ถูกต้อง"], bad: ["!", "ไม่ถูกต้อง"], have: ["•", "มีอยู่แล้ว"] };
+    const why = (e) => !EMAIL.test(e) ? "ไม่ใช่รูปแบบอีเมล" : !CMU.test(e.split("@")[1]) ? "ต้องเป็นอีเมล @cmu.ac.th" : "";
+    const inp = h("input", { type: "text", "aria-label": "อีเมล", placeholder: "พิมพ์อีเมลแล้วกด Enter หรือวางหลายอีเมล", autocomplete: "off", autocapitalize: "none", spellcheck: false });
     const wrap = h("div", { class: "field-chips", role: "group", "aria-label": "อีเมลที่จะเพิ่ม", onclick: () => inp.focus() });
     const note = h("p", { class: "note3", role: "status" });
     const role = h("select", { class: "field", "aria-label": "บทบาท" }, Object.entries(ROLE).map(([v, t]) => h("option", { value: v }, t)));
     const draw = () => {
-      wrap.replaceChildren(...chips.map((c, i) => { const k = kind(c); return h("span", { class: "chip3 " + (k === "ok" ? "" : k), title: TITLE[k] },
-        h("span", {}, c), h("button", { type: "button", "aria-label": "ลบ " + c, onclick: (e) => { e.stopPropagation(); chips.splice(i, 1); draw(); inp.focus(); } }, "✕")); }), inp);
-      const n = { ok: 0, bad: 0, have: 0, warn: 0 }; chips.forEach((c) => n[kind(c)]++);
-      const add = n.ok + n.warn;
-      go.disabled = !add; go.textContent = add ? "เพิ่ม " + add + " คน" : "เพิ่ม";
-      const bits = [n.bad ? h("span", { class: "e" }, n.bad + " อีเมลไม่ถูกต้อง (จะถูกข้าม)") : null, n.have ? h("span", {}, n.have + " มีอยู่แล้ว (จะถูกข้าม)") : null, n.warn ? h("span", { class: "w" }, n.warn + " ไม่ใช่ @cmu.ac.th") : null].filter(Boolean);
-      note.replaceChildren(...bits.flatMap((b, i) => i ? [" · ", b] : [b]));
+      wrap.replaceChildren(...chips.map((c, i) => { const k = kind(c); return h("span", { class: "chip3 " + k, title: k === "bad" ? why(c) : "" },
+        h("i", { "aria-hidden": "true" }, LABEL[k][0]), h("span", { class: "em" }, c), h("small", {}, LABEL[k][1]),
+        h("button", { type: "button", "aria-label": "ลบ " + c, onclick: (e) => { e.stopPropagation(); chips.splice(i, 1); draw(); inp.focus(); } }, "✕")); }), inp);
+      const n = { ok: 0, bad: 0, have: 0 }; chips.forEach((c) => n[kind(c)]++);
+      go.disabled = !n.ok; go.textContent = n.ok ? "เพิ่ม " + n.ok + " คน" : "เพิ่ม";
+      note.textContent = chips.length ? [n.ok && "ถูกต้อง " + n.ok, n.bad && "ไม่ถูกต้อง " + n.bad + " (ข้าม)", n.have && "มีอยู่แล้ว " + n.have + " (ข้าม)"].filter(Boolean).join(" · ") : "";
     };
     const check = async () => {
-      const mine = ++seq, todo = chips.filter((c) => EMAIL.test(c) && !(c in seen));
+      const mine = ++seq, todo = chips.filter((c) => kind(c) !== "bad" && !(c in seen));
       if (!todo.length) return;
       const r = await call("preview", "POST", { emails: todo.join("\n") }).catch(() => null);
       if (mine !== seq || !r) return;  // a newer change is already being checked
@@ -366,22 +472,40 @@ async function staffUsers(body) {
     inp.addEventListener("blur", flush);
     const go = h("button", { class: "primary", type: "button", disabled: true, onclick: act(async () => {
       flush();
-      const mine = chips.filter((c) => ["ok", "warn"].includes(kind(c)));
+      const mine = chips.filter((c) => kind(c) === "ok");
       if (!mine.length) return;
       if (role.value === "staff" && !confirm("ให้ทุกคนในรายการนี้เป็นเจ้าหน้าที่?\nเจ้าหน้าที่จะเห็นเอกสารของนักวิจัยทุกคนและตรวจอนุมัติได้")) return;
       const r = await call("add", "POST", { emails: mine.join("\n"), role: role.value });
       d.close(); toast("เพิ่มแล้ว " + r.added.length + " คน"); reload();
     }) }, "เพิ่ม");
-    const dot = (c, t) => h("span", {}, h("i", { style: "background:" + c }), t);
     const d = modal("เพิ่มผู้ใช้", () => d.remove(),
-      h("p", { class: "muted" }, "เฉพาะอีเมลที่เพิ่มไว้ที่นี่เท่านั้นที่เข้าระบบได้ ชื่อจะมาจากบัญชี CMU เมื่อเขาเข้าระบบครั้งแรก"),
-      h("p", { class: "muted" }, "พิมพ์อีเมล CMU แล้วกด Enter หรือวางรายการอีเมลทั้งหมดได้เลย"), wrap,
-      h("div", { class: "legend" }, dot("var(--accent)", "จะถูกเพิ่ม"), dot("var(--err)", "ไม่ถูกต้อง"), dot("var(--muted)", "มีอยู่แล้ว"), dot("var(--warn)", "ไม่ใช่ @cmu.ac.th")),
-      note, h("div", { class: "foot" }, h("label", { class: "muted" }, "บทบาท", role), go));
+      h("p", { class: "muted lead" }, "เฉพาะอีเมล CMU ที่เพิ่มไว้ที่นี่เท่านั้นที่เข้าระบบได้"),
+      wrap, note,
+      h("div", { class: "foot" }, h("label", { class: "rolepick" }, h("span", { class: "muted" }, "บทบาท"), role), h("div", { class: "actions" }, h("button", { class: "ghost", type: "button", onclick: () => d.close() }, "ยกเลิก"), go)),
+      h("p", { class: "muted hint2" }, "ชื่อจะมาจากบัญชี CMU เมื่อเขาเข้าระบบครั้งแรก"));
     draw();
     document.body.append(d); d.showModal(); inp.focus();
   };
-  body.append(h("div", { class: "between" }, h("h1", { class: "page-title" }, "ผู้ใช้"), h("button", { class: "primary", type: "button", onclick: addDialog }, "+ เพิ่มผู้ใช้")),
+
+  // who gave or took access, newest first
+  const historyDialog = async () => {
+    let shown = [], total = 0;
+    const list = h("div", { class: "ulist" }), more = h("button", { class: "ghost more", type: "button", hidden: true });
+    const WHAT = { role: (e) => "เปลี่ยนบทบาทของ " + (e.target_name || e.target) + " เป็น" + ROLE[e.detail], add: (e) => "เพิ่ม " + (e.target_name || e.target) + " เป็น" + ROLE[e.detail],
+      disable: (e) => "ปิดใช้งาน " + (e.target_name || e.target), enable: (e) => "เปิดใช้งาน " + (e.target_name || e.target) };
+    const draw = () => {
+      list.replaceChildren(...(shown.length ? shown.map((e) => h("div", { class: "urow" }, h("div", {}, h("b", {}, (WHAT[e.action] || (() => e.action))(e)),
+        h("small", { class: "muted" }, (e.actor_name || e.actor) + " · " + utc(e.at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })))))
+        : [h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนแปลง")]));
+      more.hidden = shown.length >= total; more.textContent = "แสดงเพิ่ม (อีก " + (total - shown.length) + " รายการ)";
+    };
+    const load = async () => { const r = await api("/users/events?limit=50&offset=" + shown.length); shown = shown.concat(r.items); total = r.total; draw(); };
+    more.onclick = act(load);
+    const d = modal("ประวัติการเปลี่ยนแปลงสิทธิ์", () => d.remove(), list, more);
+    document.body.append(d); d.showModal();
+    await load();
+  };
+  body.append(h("div", { class: "between" }, h("h1", { class: "page-title" }, "ผู้ใช้"), h("div", { class: "actions" }, h("button", { class: "ghost", type: "button", onclick: act(historyDialog) }, "ประวัติการเปลี่ยนแปลง"), h("button", { class: "primary", type: "button", onclick: addDialog }, "+ เพิ่มผู้ใช้"))),
     h("p", { class: "muted sub" }, "เฉพาะคนในรายการนี้เท่านั้นที่เข้าระบบได้ บทบาทมีผลในการใช้งานครั้งถัดไปของเขา"), h("section", { class: "card" }, h("div", { class: "filters" }, find), chips, list, note, more));
   await load(true);
   users = await api("/users");  // the page-wide name list stays current for the other tabs
@@ -395,8 +519,16 @@ async function staffFiles(body) {
   filesTab.open();
 }
 
+// a table of rows: cols is the CSS grid width list; head and rows are arrays of cells; a click on a row runs onclick; cells marked `.opt` hide on phones
+function dtable(cols, head, rows) {
+  const st = "--cols:" + cols;
+  return h("div", { class: "dt", role: "table" }, h("div", { class: "trow dt head", style: st, role: "row" }, head.map((t, i) => h("span", { class: i && i < head.length - 1 ? "opt" : "", role: "columnheader" }, t))),
+    ...rows.map(({ cells, onclick, label }, i) => h("div", { class: "trow dt click", style: st + ";--i:" + Math.min(i, 12), role: "row", tabindex: "0", "aria-label": label, onclick,
+      onkeydown: (ev) => { if (ev.key === "Enter" && ev.target === ev.currentTarget) onclick(); } }, cells.map((c, i) => h("span", { class: i && i < cells.length - 1 ? "opt" : "", role: "cell" }, c)))));
+}
+
 async function staffSubs(body, queue = []) {
-  const subs = await api("/submissions");
+  const subs = (await api("/submissions")).filter((s) => !gone(s.id));
   const nm = (id) => users.find((u) => u.id === id)?.name || id;
   const progress = (s) => {
     const done = s.current_step >= s.step_count, n = Math.min(s.current_step + 1, s.step_count);
@@ -405,7 +537,7 @@ async function staffSubs(body, queue = []) {
   };
   const waiting = new Set(queue.map((q) => q.submission_id));
   const find = h("input", { type: "search", placeholder: "ค้นหาชื่องาน ประเภท หรือนักวิจัย", "aria-label": "ค้นหา" });
-  const status = h("select", { class: "field", "aria-label": "สถานะ" }, [["", "ทุกสถานะ"], ["review", "รอตรวจสอบ"], ["active", "กำลังดำเนินการ"], ["done", "เสร็จสิ้น"]].map(([v, t]) => h("option", { value: v }, t)));
+  const status = h("select", { class: "field", "aria-label": "สถานะ" }, [["", "ทุกสถานะ"], ["active", "กำลังดำเนินการ"], ["done", "เสร็จสิ้น"]].map(([v, t]) => h("option", { value: v }, t)));
   const who = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบ" }, [h("option", { value: "" }, "ผู้รับผิดชอบทุกคน"), h("option", { value: me.id }, "ของฉัน"),
     ...users.filter((u) => u.active && u.role === "staff" && u.id !== me.id).map((u) => h("option", { value: u.id }, u.name))]);
   const count = h("p", { class: "muted sub" }), list = h("div");
@@ -413,28 +545,26 @@ async function staffSubs(body, queue = []) {
     const q = find.value.trim().toLowerCase();
     const shown = subs.filter((s) => (!q || (s.title + " " + s.type_name + " " + s.researcher_ids.map(nm).join(" ")).toLowerCase().includes(q))
       && (!who.value || s.staff_id === who.value)
-      && (!status.value || (status.value === "review" ? waiting.has(s.id) : status.value === "done" ? s.current_step >= s.step_count : s.current_step < s.step_count)));
+      && (!status.value || (status.value === "done" ? s.current_step >= s.step_count : s.current_step < s.step_count)));
     count.textContent = shown.length === subs.length ? subs.length + " รายการ" : shown.length + " จาก " + subs.length + " รายการ";
-    const short = (s) => s.title.startsWith(s.type_name + " - ") ? s.title.slice(s.type_name.length + 3) : s.title;  // the type is already the group's heading
-    const row = (s) => h("div", { class: "list-row" },
-      h("span", { class: "grow" }, h("b", {}, short(s)), " ", waiting.has(s.id) ? h("span", { class: "badge warn" }, "รอตรวจสอบ") : null,
-        h("span", { class: "muted block" }, "นักวิจัย " + s.researcher_ids.map(nm).join(", ") + " · ผู้รับผิดชอบ " + nm(s.staff_id))),
-      progress(s),
-      h("button", { class: "ghost", type: "button", onclick: () => staffDetail(s.id) }, "ดูรายละเอียด"));
+    const open = (s) => ({ label: s.title, onclick: () => staffDetail(s.id), cells: [
+      h("span", {}, h("b", {}, s.researcher_ids.map(nm).join(", ")), " ", waiting.has(s.id) ? h("span", { class: "badge warn" }, "รอตรวจสอบ") : null),  // the type is the group's heading, so the researcher names the row
+      nm(s.staff_id), progress(s), "›"] });
+    const reqTable = (rows) => dtable("minmax(160px,1.4fr) minmax(90px,.8fr) 190px 24px", ["นักวิจัย", "ผู้รับผิดชอบ", "ความคืบหน้า", ""], rows.map(open));
     if (openGroup) {  // inside one type: every request of it
       const inGroup = shown.filter((s) => s.type_id === openGroup);
       list.replaceChildren(h("div", { class: "grpbar" }, h("button", { class: "ghost", type: "button", onclick: () => { openGroup = null; draw(); } }, "← ประเภทงานทั้งหมด"),
-        h("b", {}, subs.find((s) => s.type_id === openGroup)?.type_name || "")), ...(inGroup.length ? inGroup.map(row) : [h("p", { class: "muted" }, "ไม่พบงานที่ตรงกับตัวกรอง")]));
+        h("b", {}, subs.find((s) => s.type_id === openGroup)?.type_name || "")), inGroup.length ? reqTable(inGroup) : h("p", { class: "muted" }, "ไม่พบงานที่ตรงกับตัวกรอง"));
       return;
     }
     const groups = [...new Set(shown.map((s) => s.type_id))].map((id) => {
-      const mine = shown.filter((s) => s.type_id === id);
-      return h("div", { class: "list-row" },
-        h("span", { class: "grow" }, h("b", {}, mine[0].type_name), " ", mine.some((s) => waiting.has(s.id)) ? h("span", { class: "badge warn" }, mine.filter((s) => waiting.has(s.id)).length + " รอตรวจสอบ") : null,
-          h("span", { class: "muted block" }, mine.length + " งาน · กำลังดำเนินการ " + mine.filter((s) => s.current_step < s.step_count).length + " · เสร็จสิ้น " + mine.filter((s) => s.current_step >= s.step_count).length)),
-        h("button", { class: "ghost", type: "button", onclick: () => { openGroup = id; draw(); } }, "เปิดดูงาน"));
+      const mine = shown.filter((s) => s.type_id === id), wait = mine.filter((s) => waiting.has(s.id)).length;
+      return { label: mine[0].type_name, onclick: () => { openGroup = id; draw(); }, cells: [h("b", {}, mine[0].type_name), String(mine.length),
+        String(mine.filter((s) => s.current_step < s.step_count).length), String(mine.filter((s) => s.current_step >= s.step_count).length),
+        wait ? h("span", { class: "badge warn" }, wait + " รอตรวจสอบ") : "", "›"] };
     });
-    list.replaceChildren(...(groups.length ? groups : [h("p", { class: "muted" }, subs.length ? "ไม่พบงานที่ตรงกับตัวกรอง" : "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากประเภทงานที่เปิดรับงาน (เลือกได้ว่าใครเห็น ในหน้าของแต่ละประเภทงาน)")]));
+    list.replaceChildren(groups.length ? dtable("minmax(160px,1.6fr) 70px 110px 90px 130px 24px", ["ประเภทงาน", "งาน", "กำลังดำเนินการ", "เสร็จสิ้น", "รอตรวจสอบ", ""], groups)
+      : h("p", { class: "muted" }, subs.length ? "ไม่พบงานที่ตรงกับตัวกรอง" : "ยังไม่มีงาน นักวิจัยเริ่มเองได้จากประเภทงานที่เปิดรับงาน (เลือกได้ว่าใครเห็น ในหน้าของแต่ละประเภทงาน)"));
   };
   [find, status, who].forEach((el) => el.addEventListener(el === find ? "input" : "change", draw));
   draw();
@@ -442,39 +572,74 @@ async function staffSubs(body, queue = []) {
     h("section", { class: "card" }, subs.length ? h("div", { class: "filters" }, find, status, who) : null, list));
 }
 
-// one document of a request, as staff see it: the researcher's view for the in-charge staff (who may fill it in), plus review once sent
-function staffDoc(sub, name, mine) {
-  const up = sub.uploads.find((u) => u.doc_name === name), again = () => staffDetail(sub.id).catch(fail);
-  if (!mine) return h("div", { class: "doc" }, h("b", {}, name), " ", h("span", { class: "muted" }, up ? STATUS[up.status] : "ยังไม่ได้ส่ง"), up ? (up.answers.length ? answersView(up) : h("a", { href: "/api/track/uploads/" + up.id + "/file", target: "_blank" }, "เปิดไฟล์ " + up.filename)) : null);
-  if (up && up.status === "sent") return h("div", { class: "doc" }, h("b", {}, name), " ", h("span", { class: "muted" }, STATUS.sent),
-    up.answers.length ? answersView(up) : h("a", { href: "/api/track/uploads/" + up.id + "/file", target: "_blank" }, "เปิดไฟล์ " + up.filename), ...reviewBlock(up, true, again));
-  return docRow(sub, name, again);
+// one page for every request (/requests/{id}): the queue, the all-requests list and the bell all open it; picking a document or deciding redraws it in place
+const requestPath = (sid) => "/requests/" + sid;
+async function staffDetail(sid, pick) {
+  const sub = await api("/submissions/" + sid).catch((e) => { fail(e); return null; });
+  if (!sub) return;
+  if (location.pathname !== requestPath(sid)) { history.pushState({ req: true }, "", requestPath(sid)); scrollTo(0, 0); }  // a new address, so refresh and the browser Back button work
+  const now = new Date().toISOString(), mine = sub.staff_id === me.id, finished = sub.current_step >= sub.step_count;
+  const nm = (id) => users.find((u) => u.id === id)?.name || id;
+  const docs = (finished ? [] : sub.steps[sub.current_step].documents).map((name) => ({ name, up: sub.uploads.find((u) => u.doc_name === name) }));
+  const waiting = docs.filter((x) => x.up?.status === "sent");
+  const cur = docs.find((x) => x.name === pick) || waiting[0] || docs.find((x) => x.up) || docs[0] || null, u = cur?.up, sent = u?.status === "sent";
+  const again = () => staffDetail(sid, cur?.name);
+  const changed = again;
+  const reviewed = docs.filter((x) => x.up && (x.up.status === "approved" || x.up.status === "returned")).length;
+  const rv = sent ? reviewBlock(u, mine, changed, true) : null;
+  const from = sub.researcher_ids.map(nm).join(", ") || "นักวิจัย";
+  const sec = (title, ...kids) => h("section", { class: "rv-sec" }, h("h3", {}, title), kids.flat());
+  const manage = (title, ...kids) => { const e = sec(title, ...kids); e.classList.add("divided"); return e; };
+  const viewLink = (up) => h("a", { class: "rv-open", href: "/api/track/uploads/" + up.id + "/file", target: "_blank", onclick: (ev) => ev.stopPropagation() }, "ดูเอกสาร ↗");
+  const state = (x) => !x.up ? h("span", { class: "muted" }, "ยังไม่ได้ส่ง") : h("span", { class: "rv-st " + x.up.status }, x.up.status === "sent" ? "รอตรวจสอบ" : x.up.status === "approved" ? "ผ่านการตรวจสอบ" : x.up.status === "returned" ? "ส่งกลับแล้ว" : STATUS[x.up.status]);
+  const pickIt = (x) => () => { if (x !== cur) staffDetail(sid, x.name); };
+  const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); await changed(); });
+  const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await api("/submissions/" + sid + "/staff", send("POST", { staff_id: ev.target.value })); await changed(); }) },
+    users.filter((x) => x.active && x.role === "staff").map((x) => h("option", { value: x.id, selected: x.id === sub.staff_id }, "ผู้รับผิดชอบ " + x.name)));
+  const kids = [
+    sec("ข้อมูลคำขอ", h("div", { class: "rv-card" }, h("small", {}, "ประเภทงาน"), h("b", { class: "rv-type" }, sub.type_name),
+      h("div", { class: "rv-meta" },
+        h("div", { class: "rv-from" }, h("span", { class: "rv-av", "aria-hidden": "true" }, [...from][0].toUpperCase()), h("div", {}, h("small", {}, "นักวิจัย"), h("b", {}, from))),
+        h("div", {}, h("small", {}, "ผู้รับผิดชอบ"), h("b", {}, nm(sub.staff_id))),
+        h("div", {}, h("small", {}, "ขั้นตอน"), h("b", {}, finished ? "เสร็จสิ้น" : (sub.current_step + 1) + "/" + sub.step_count + " " + sub.steps[sub.current_step].title)))), stepper(sub)),
+    sec(finished ? "เอกสาร" : "เอกสารของขั้นตอนนี้" + (docs.length > 1 ? " (" + docs.length + ")" : ""),
+      finished ? h("p", { class: "muted" }, "ดำเนินการเสร็จสิ้น")
+        : !docs.length ? h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร")
+        : [docs.length > 1 ? h("div", { class: "rv-prog" }, h("span", { class: "bar" }, h("i", { style: "width:" + Math.round(100 * reviewed / docs.length) + "%" })), h("span", { class: "muted" }, "ตรวจแล้ว " + reviewed + " จาก " + docs.length)) : null,
+          h("div", { class: "rv-list" }, docs.map((x) => { const can = x.up || mine; return h("div", { class: "rv-item" + (x === cur ? " on" : "") + (can ? " pick" : ""), role: can ? "button" : null, tabindex: can ? "0" : null, "aria-current": x === cur ? "true" : null,
+            onclick: can ? pickIt(x) : null, onkeydown: (ev) => { if (ev.key === "Enter" && ev.target === ev.currentTarget && can) pickIt(x)(); } },
+            h("span", { class: "rv-ic", "aria-hidden": "true" }, icon("form")), h("div", { class: "grow" }, h("b", {}, x.name), x.up ? h("span", { class: "muted" }, x.up.filename) : null),
+            state(x), x.up && !x.up.answers.length ? viewLink(x.up) : null); }))]),
+    cur ? (sent ? [u.answers.length ? sec("คำตอบ: " + cur.name, answersView(u)) : null, rv.findings.length ? sec("ข้อสังเกตจาก AI", rv.findings) : null,
+        mine ? [sec("หมายเหตุถึงนักวิจัย (ไม่บังคับ)", rv.note), h("div", { class: "rv-foot" }, rv.buttons)] : h("p", { class: "muted rv-view" }, "เฉพาะผู้รับผิดชอบเท่านั้นที่ตัดสินได้")]
+      : mine ? sec("เอกสาร: " + cur.name, docRow(sub, cur.name, again))  // fill in or upload for the researcher until it is sent
+      : [u?.findings.length ? sec("ข้อสังเกตจาก AI", findings(u.findings, u.dismissed || [])) : null,
+        h("p", { class: "muted rv-view" }, u ? STATUS[u.status] + (u.note ? " · หมายเหตุ: " + u.note : "") : "ยังไม่ได้ส่ง")]) : null,
+    manage("จัดการงาน", h("div", { class: "actions" }, owner, h("span", { class: "muted" }, "เปลี่ยนผู้รับผิดชอบได้ทุกคน เมื่อคนเดิมไม่อยู่")),
+      h("div", { class: "actions steps" },
+        h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
+        h("button", { class: "primary", type: "button", disabled: !mine || finished, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
+        mine ? h("button", { class: "ghost danger", type: "button", onclick: () => { deleteLater(sid, "ลบงาน “" + sub.title + "” แล้ว", () => staffDetail(sid).catch(fail)); leaveRequest(); } }, "ลบงานนี้")
+          : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้รับผิดชอบเท่านั้นที่แก้ไขได้"))),
+    manage("ประวัติ", sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + nm(e.staff_id) + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน"))];
+  showRead(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: leaveRequest }, "← กลับ")), kids.flat(Infinity).filter(Boolean));  // kids nest (a branch can be a list), so flatten all the way
 }
 
-async function staffDetail(sid) {
-  const sub = await api("/submissions/" + sid);
-  const mine = sub.staff_id === me.id;
-  const nm = (id) => users.find((u) => u.id === id)?.name || id;
-  const move = (to) => act(async () => { await api("/submissions/" + sid + "/move", send("POST", { to_step: to })); await staffDetail(sid); });
-  const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await api("/submissions/" + sid + "/staff", send("POST", { staff_id: ev.target.value })); staffDetail(sid); }) },
-    users.filter((u) => u.active && u.role === "staff").map((u) => h("option", { value: u.id, selected: u.id === sub.staff_id }, "ผู้รับผิดชอบ " + u.name)));
-  show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: staffHome }, "← กลับ")),
-    h("section", { class: "card" }, h("h2", {}, sub.title), h("p", { class: "muted" }, sub.type_name + " · นักวิจัย " + sub.researcher_ids.map(nm).join(", ")), h("div", { class: "actions" }, owner, h("span", { class: "muted" }, "เปลี่ยนผู้รับผิดชอบได้ทุกคน เมื่อคนเดิมไม่อยู่")), stepper(sub),
-      h("div", { class: "actions" },
-        h("button", { class: "ghost", type: "button", disabled: !mine || sub.current_step <= 0, onclick: move(sub.current_step - 1) }, "ย้อนกลับหนึ่งขั้น"),
-        h("button", { class: "primary", type: "button", disabled: !mine || sub.current_step >= sub.step_count, onclick: move(sub.current_step + 1) }, "ไปขั้นถัดไป"),
-        mine ? h("button", { class: "ghost danger", type: "button", onclick: act(async () => { if (confirm("ลบงาน “" + sub.title + "” ทั้งหมด? ย้อนกลับไม่ได้")) { await api("/submissions/" + sid, { method: "DELETE" }); staffHome(); } }) }, "ลบงานนี้")
-          : h("span", { class: "muted" }, "เฉพาะเจ้าหน้าที่ผู้รับผิดชอบเท่านั้นที่แก้ไขได้"))),
-    h("section", { class: "card" }, h("h2", {}, "เอกสารของขั้นตอนนี้"),
-      mine ? h("p", { class: "muted sub" }, "กรอกหรืออัปโหลดแทนนักวิจัยได้จนกว่าจะส่ง เมื่อส่งแล้วตรวจสอบและอนุมัติได้ที่นี่") : h("p", { class: "muted sub" }, "ดูได้อย่างเดียว"),
-      sub.current_step >= sub.step_count ? h("p", { class: "muted" }, "ดำเนินการเสร็จสิ้น")
-        : !sub.steps[sub.current_step].documents.length ? h("p", { class: "muted" }, "ขั้นตอนนี้ไม่ต้องส่งเอกสาร")
-        : sub.steps[sub.current_step].documents.map((d) => staffDoc(sub, d, mine))),
-    h("section", { class: "card" }, h("h2", {}, "ประวัติ"), sub.events.length ? sub.events.map((e) => h("p", { class: "muted" }, e.at + " · ขั้น " + (e.from_step + 1) + " → " + (e.to_step + 1) + " · " + nm(e.staff_id) + (e.note ? " · " + e.note : ""))) : h("p", { class: "muted" }, "ยังไม่มีการเปลี่ยนขั้นตอน")));
+// back to the list the request was opened from (the page before it in the history, or the home list when it was opened by address)
+function leaveRequest() {
+  if (history.state?.req) history.back();
+  else { history.replaceState({}, "", "/"); staffHome(); }
 }
+window.addEventListener("popstate", () => {
+  if (!me) return;
+  const m = location.pathname.match(/^\/requests\/(\d+)$/);
+  if (m && me.role === "staff") staffDetail(Number(m[1])).catch(fail);
+  else if (location.pathname === "/" && me.role === "staff") staffHome().catch(fail);
+  else if (location.pathname === "/") { openReq = history.state?.open || null; researcherHome().catch(fail); }
+});
 
 // findings to dismiss, a note, approve or return: shared by the review queue and a request's page
-function reviewBlock(u, mine, after) {
+function reviewBlock(u, mine, after, parts = false) {
   const dismissed = new Set();
   const note = h("input", { type: "text", placeholder: "หมายเหตุถึงนักวิจัย (ไม่บังคับ)" });
   const list = h("div", { class: "findings" });
@@ -482,25 +647,38 @@ function reviewBlock(u, mine, after) {
     h("input", { type: "checkbox", checked: dismissed.has(i), "aria-label": "ปัดตก", onchange: (ev) => { ev.target.checked ? dismissed.add(i) : dismissed.delete(i); draw(); } }))));
   draw();
   const decide = (decision) => act(async () => { await api("/uploads/" + u.id + "/review", send("POST", { decision, dismissed: [...dismissed], note: note.value })); await after(); });
-  return [u.findings.length ? h("p", { class: "fsum" }, "ข้อสังเกตจาก AI " + u.findings.length + " ข้อ · ติ๊กข้อที่ไม่ต้องสนใจเพื่อปัดตก") : null, list, note, h("div", { class: "actions" },
-    h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"),
-    h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข"),
+  const sum = u.findings.length ? h("p", { class: "fsum" }, "ข้อสังเกตจาก AI " + u.findings.length + " ข้อ · ติ๊กข้อที่ไม่ต้องสนใจเพื่อปัดตก") : null;
+  const ret = h("button", { class: "ghost danger", type: "button", disabled: !mine, onclick: decide("return") }, "ส่งกลับให้แก้ไข");
+  if (parts) return { findings: u.findings.length ? [sum, list] : [], note, buttons: [mine ? null : h("span", { class: "muted" }, "เฉพาะผู้รับผิดชอบเท่านั้น"), ret,
+    h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, icon("check"), "อนุมัติเอกสาร")] };  // the review window lays them out itself
+  return [sum, list, note, h("div", { class: "actions" },
+    h("button", { class: "primary", type: "button", disabled: !mine, onclick: decide("approve") }, "อนุมัติ"), ret,
     mine ? null : h("span", { class: "muted" }, "เฉพาะผู้รับผิดชอบเท่านั้น"))];
 }
 
-async function staffQueue(body, q, subs) {
-  const now = new Date().toISOString(), st = staffStats(q, subs, now);
-  const stat = (n, label) => h("div", { class: "stat" }, h("b", {}, String(n)), h("span", {}, label));
-  body.append(...[h("h1", { class: "page-title" }, "เอกสารรอตรวจสอบ"), h("p", { class: "muted sub" }, "เรียงตามวันที่ส่ง (เก่าสุดก่อน)"),
-    q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจสอบ"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจสอบเกิน 7 วัน")) : null,
-    q.length ? h("div", {}, q.map((u) => {
-    const rv = reviewBlock(u, u.staff_id === me.id, staffHome);
-    const ai = u.findings.length ? h("span", { class: "badge warn" }, "AI พบ " + u.findings.length + " ข้อ") : h("span", { class: "badge ok" }, "AI ไม่พบข้อสังเกต (หรือตรวจสอบไม่ได้)");
-    return h("div", { class: "doc" }, h("div", { class: "between" }, h("span", {}, h("b", {}, u.doc_name), " ", h("span", { class: "muted" }, "· " + u.submission_title)), ai),
-      h("p", { class: "muted sub" }, "ผู้รับผิดชอบ " + (users.find((x) => x.id === u.staff_id)?.name || u.staff_id) + " · ส่ง " + agoText(u.created, now)), " ",
-      u.answers.length ? answersView(u) : h("a", { href: "/api/track/uploads/" + u.id + "/file", target: "_blank" }, "เปิดไฟล์ " + u.filename),
-      ...rv);
-  })) : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ยังไม่มีเอกสารรอตรวจสอบ"), h("p", { class: "muted" }, "เมื่อมีนักวิจัยส่งเอกสารเพื่อตรวจสอบ รายการจะแสดงที่นี่"))].filter(Boolean));
+async function staffQueue(body, everyone, subs) {
+  const now = new Date().toISOString();
+  const stat = (n, label, kind) => h("div", { class: "stat" + (n && kind ? " " + kind : "") }, h("b", {}, String(n)), h("span", {}, label));
+  const nm = (id) => users.find((u) => u.id === id)?.name || id;
+  const who = (sid) => (subs.find((s) => s.id === sid)?.researcher_ids || []).map(nm).join(", ");
+  // the queue has one row per request (its sent documents together); the window shows every document of the step and reviews one at a time
+  const ai = (n) => n ? h("span", { class: "badge warn" }, "AI พบ " + n + " ข้อ") : h("span", { class: "badge ok" }, "ไม่พบข้อสังเกต");
+  const view = h("div"), filter = h("select", { class: "field", "aria-label": "แสดง", onchange: (ev) => { queueAll = ev.target.value === "all"; draw(); } },
+    h("option", { value: "mine", selected: !queueAll }, "ของฉัน"), h("option", { value: "all", selected: queueAll }, "ของทุกคน"));
+  const draw = () => {
+    const q = queueAll ? everyone : everyone.filter((u) => u.staff_id === me.id), st = staffStats(q, queueAll ? subs : subs.filter((s) => s.staff_id === me.id), now);
+    const reqs = [...new Set(q.map((u) => u.submission_id))].map((sid) => ({ sid, ups: q.filter((u) => u.submission_id === sid) }));  // q is oldest first, so is this
+    const others = everyone.length - q.length;
+    view.replaceChildren(...[q.length ? h("div", { class: "stats" }, stat(st.waiting, "รอตรวจสอบ", "warn"), stat(st.active, "งานที่กำลังดำเนินการ"), stat(st.old, "รอตรวจสอบเกิน 7 วัน", "err")) : null,
+      q.length ? h("section", { class: "card" }, dtable("minmax(130px,1.2fr) minmax(100px,1fr) minmax(150px,1.3fr) minmax(90px,.8fr) 120px 90px 24px",
+        ["งาน", "นักวิจัย", "เอกสาร", "ผู้รับผิดชอบ", "AI", "ส่งเมื่อ", ""],
+        reqs.map(({ sid, ups }) => ({ label: ups[0].submission_title, onclick: () => staffDetail(sid), cells: [h("b", {}, subs.find((x) => x.id === sid)?.type_name || ups[0].submission_title), who(sid),
+          ups.length === 1 ? ups[0].doc_name : ups[0].doc_name + " และอีก " + (ups.length - 1) + " ฉบับ", nm(ups[0].staff_id), ai(ups.reduce((n, u) => n + u.findings.length, 0)), agoText(ups[0].created, now), "›"] }))))
+      : h("section", { class: "card empty" }, h("span", { class: "ic" }, icon("check")), h("b", {}, "ยังไม่มีเอกสารรอตรวจสอบ"),
+        h("p", { class: "muted" }, others ? "ไม่มีเอกสารที่ต้องตรวจโดยคุณ · ของเจ้าหน้าที่คนอื่นมีอีก " + others + " ฉบับ (เลือก “ของทุกคน” เพื่อดู)" : "เมื่อมีนักวิจัยส่งเอกสารเพื่อตรวจสอบ รายการจะแสดงที่นี่"))].filter(Boolean));
+  };
+  draw();
+  body.append(h("div", { class: "between head-row" }, h("div", {}, h("h1", { class: "page-title" }, "เอกสารรอตรวจสอบ"), h("p", { class: "muted sub" }, "เรียงตามวันที่ส่ง (เก่าสุดก่อน) กดแถวเพื่อตรวจสอบ")), everyone.length ? filter : null), view);
 }
 
 async function staffTypes(body) {
@@ -625,6 +803,7 @@ function typeTitle(t) {
   return title;
 }
 async function typePage(body, t) {
+  body.classList.add("read");
   const steps = h("section", { class: "card" }, h("div", { class: "between" }, h("h2", {}, "ขั้นตอนและเอกสาร"), h("span", { class: "tools" }, h("button", { class: "ghost", type: "button", onclick: () => draftEditor(t.id, () => { tab = "types"; staffHome(); }) }, "แก้ไข"), newVersionButton(t))),
     h("ol", { class: "steplist" }, t.steps.map((s) => h("li", {}, h("b", {}, s.title), h("span", { class: "muted block" }, s.documents.length ? "เอกสาร: " + s.documents.join(", ") : "ไม่ต้องส่งเอกสาร")))));
   const cats = await api("/categories");
@@ -651,11 +830,18 @@ async function typePage(body, t) {
 // open a type as a post researchers can start from; the owner is staff in charge of every request started from it
 function postControls(t) {
   const staff = users.filter((u) => u.active && u.role === "staff");
-  const publish = (owner) => api("/types/" + t.type_id + "/publish", send("POST", owner ? { owner_id: owner } : {}));
-  const owner = h("select", { class: "field", "aria-label": "ผู้รับผิดชอบงานนี้", onchange: act(async (ev) => { await publish(ev.target.value); staffHome(); }) },
-    staff.map((u) => h("option", { value: u.id, selected: u.id === t.owner_id }, "ผู้รับผิดชอบ " + u.name)));
+  const publish = (owners) => api("/types/" + t.type_id + "/publish", send("POST", owners ? { owner_ids: owners } : {}));
+  const picked = new Set(t.owner_ids || []);
+  const boxes = staff.map((u) => h("label", { class: "check" }, h("input", { type: "checkbox", checked: picked.has(u.id), onchange: act(async (ev) => {
+    if (ev.target.checked) picked.add(u.id); else picked.delete(u.id);
+    if (!picked.size) { picked.add(u.id); ev.target.checked = true; return; }  // at least one person stays in charge
+    await publish([...picked]); staffHome();
+  }) }), u.name));
   return t.open
-    ? h("span", { class: "tools" }, h("span", { class: "badge ok" }, "เปิดรับงาน"), owner, h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/close", { method: "POST" }); staffHome(); }) }, "ปิดรับงาน"))
+    ? h("div", { class: "owners" }, h("span", { class: "tools" }, h("span", { class: "badge ok" }, "เปิดรับงาน"),
+        h("button", { class: "ghost", type: "button", onclick: act(async () => { await api("/types/" + t.type_id + "/close", { method: "POST" }); staffHome(); }) }, "ปิดรับงาน")),
+      h("h3", {}, "ผู้รับผิดชอบ"), h("div", { class: "checks" }, boxes),
+      h("p", { class: "muted sub" }, picked.size > 1 ? "งานใหม่ของประเภทนี้จะมอบให้คนที่มีงานค้างน้อยที่สุดในกลุ่มนี้" : "เลือกได้หลายคน งานใหม่จะมอบให้คนที่มีงานค้างน้อยที่สุด"))
     : h("button", { class: "ghost", type: "button", onclick: act(async () => { await publish(); staffHome(); }) }, "เปิดรับงาน");
 }
 
@@ -727,7 +913,7 @@ async function draftEditor(vid, back = staffHome) {
     return { ...rest, documents: docs, ...(Object.keys(fm).length ? { formats: fm } : {}) };
   };
   const save = () => api("/versions/" + vid, send("PUT", { steps: steps.filter((s) => s.title.trim()).map(toStep) }));
-  show(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: back }, "← กลับ")),
+  showRead(h("div", { class: "formbar" }, h("button", { class: "ghost", type: "button", onclick: back }, "← กลับ")),
     h("section", { class: "card" }, h("h2", {}, v.type_name + (live ? "" : " (ฉบับร่าง)")),
       h("p", { class: "muted" }, live ? "แก้ข้อความที่ AI เขียนผิดได้ทันที ถ้ามีนักวิจัยเริ่มส่งงานแล้ว เพิ่มหรือลบขั้นตอนไม่ได้" : "ยังไม่ใช้งานจริงจนกว่าจะกดอนุมัติ"), box,
       h("div", { class: "actions" },
@@ -742,7 +928,11 @@ async function draftEditor(vid, back = staffHome) {
 const removeChat = () => document.querySelectorAll("#chat-drawer, #chat-fab").forEach((e) => e.remove());
 // one Escape listener for the page, not one per login: closes the notification list first, then the chat drawer
 document.addEventListener("keydown", (ev) => {
-  if (ev.key !== "Escape") return;
+  // the platform's own modifier only (Ctrl+K on a Mac is kill-line in text fields); ev.code is the physical key, so a Thai layout works too
+  const mod = (MAC ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey) && !ev.altKey && !ev.shiftKey;
+  if (mod && ev.code === "KeyK" && me) { ev.preventDefault(); palette(); return; }
+  if (mod && ev.code === "KeyZ" && undoFn && !ev.target.closest?.("input, textarea, select, [contenteditable]")) { ev.preventDefault(); undoFn(); return; }
+  if (ev.key !== "Escape" || document.querySelector("dialog[open]")) return;  // an open dialog closes itself on Esc; the drawer behind it stays
   const pill = document.querySelector(".fpill[open]");
   if (pill) { pill.open = false; pill.querySelector("summary").focus(); return; }
   const notes = document.getElementById("notes");
@@ -761,18 +951,76 @@ function chatDrawer() {
   const frame = h("iframe", { class: "chat-frame", title: "ผู้ช่วย AI ของ RiSA" });
   const panel = h("aside", { class: "chat-drawer", id: "chat-drawer", hidden: true },
     h("div", { class: "chat-head" }, h("b", {}, "ถาม AI"), h("button", { class: "ghost", type: "button", "aria-label": "ปิดแชท", onclick: () => toggle(false) }, "×")), frame);
-  const fab = h("button", { class: "primary chat-fab", id: "chat-fab", type: "button", onclick: () => toggle(true) }, icon("chat"), "ถาม AI");
+  const preload = () => { if (!frame.getAttribute("src")) frame.src = "/chat"; };  // loaded when the pointer or focus reaches the button, so it is usually ready by the click; never at page load
+  const fab = h("button", { class: "primary chat-fab", id: "chat-fab", type: "button", onclick: () => toggle(true), onpointerenter: preload, onfocus: preload }, icon("chat"), "ถาม AI");
   function toggle(open) {
     panel.hidden = !open;
     fab.hidden = open;
-    if (open && !frame.getAttribute("src")) frame.src = "/chat";  // loaded on first open, not at page load
+    if (open) preload();
     (open ? panel.querySelector(".chat-head button") : fab).focus();  // keyboard users land inside the drawer, and back on the button when it closes
   }
   document.body.append(fab, panel);
 }
 
+// ---------- Ctrl/Cmd+K palette: jump to a menu, a tab or a request by typing ----------
+let palSubs = [];  // the last request list: shown the moment the palette opens, then refreshed behind it (stale-while-revalidate)
+function palette() {
+  if (!me || document.querySelector("dialog[open]")) return;
+  const away = location.pathname === "/profile";  // the profile is its own page load: leave it by address
+  const home = (fn, url = "/") => () => (away ? location.assign(url) : fn());
+  const nm = (id) => users.find((u) => u.id === id)?.name || id;
+  const items = () => [
+    ...(me.role === "staff" ? STAFF_TABS.filter(Boolean).map(([k, , label]) => ({ label, tag: "เมนู", run: home(() => goTab(k)) }))
+      : [{ label: "งานของฉัน", tag: "เมนู", run: home(() => { if (openReq) leaveMine(); }) },
+        { label: "ถาม AI", tag: "เมนู", run: () => { const fab = document.getElementById("chat-fab"); fab ? fab.click() : location.assign("/chat"); } }]),
+    { label: "โปรไฟล์ของฉัน", tag: "เมนู", run: () => location.assign("/profile") },
+    ...palSubs.map((s) => ({ label: s.title, sub: me.role === "staff" ? [s.type_name, s.researcher_ids.map(nm).join(", ")].filter(Boolean).join(" · ") : s.type_name, tag: "งาน",
+      run: me.role === "staff" ? home(() => staffDetail(s.id).catch(fail), requestPath(s.id)) : home(() => { openReq = s.id; researcherHome().catch(fail); }) })),
+  ];
+  const input = h("input", { type: "text", role: "combobox", "aria-expanded": "true", "aria-controls": "pal-list", "aria-autocomplete": "list", "aria-label": "ค้นหาเมนูหรืองาน",
+    placeholder: "ไปที่… พิมพ์ชื่องาน เมนู หรือชื่อนักวิจัย", autocomplete: "off", spellcheck: false });
+  const list = h("ul", { id: "pal-list", role: "listbox", "aria-label": "ผลการค้นหา" });
+  const d = h("dialog", { class: "pal", "aria-label": "ค้นหาและไปที่", onclose: () => d.remove(), onclick: (ev) => { if (ev.target === d) d.close(); } }, input, list,
+    h("div", { class: "pal-foot", "aria-hidden": "true" }, h("span", {}, h("kbd", {}, "↑"), " ", h("kbd", {}, "↓"), " เลือก"), h("span", {}, h("kbd", {}, "Enter"), " เปิด"), h("span", {}, h("kbd", {}, "Esc"), " ปิด")));
+  let shown = [], at = 0;
+  const go = (it) => { d.close(); it.run(); };
+  const select = (i) => {
+    at = i;
+    [...list.children].forEach((li, j) => li.setAttribute("aria-selected", String(j === i)));
+    input.setAttribute("aria-activedescendant", "pal-" + i);
+    list.children[i]?.scrollIntoView({ block: "nearest" });
+  };
+  const draw = () => {
+    const words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);  // every word must appear, in any order
+    shown = items().filter((it) => words.every((w) => (it.label + " " + (it.sub || "")).toLowerCase().includes(w))).slice(0, 50);
+    list.replaceChildren(...(shown.length ? shown.map((it, i) => h("li", { id: "pal-" + i, role: "option", onclick: () => go(it), onpointermove: () => { if (at !== i) select(i); } },
+      h("span", { class: "grow" }, h("b", {}, it.label), it.sub ? h("small", {}, it.sub) : null), h("small", { class: "tag" }, it.tag)))
+      : [h("li", { class: "none", role: "presentation" }, "ไม่พบผลลัพธ์")]));
+    if (shown.length) select(Math.min(at, shown.length - 1)); else input.removeAttribute("aria-activedescendant");
+  };
+  input.addEventListener("input", () => { at = 0; draw(); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.isComposing) return;  // Thai and other IMEs use the arrows and Enter while composing
+    if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && shown.length) { ev.preventDefault(); select((at + (ev.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length); }
+    else if (ev.key === "Enter" && shown[at]) { ev.preventDefault(); go(shown[at]); }
+  });
+  document.body.append(d); d.showModal(); draw();
+  api("/submissions").then((r) => { palSubs = r.filter((s) => !gone(s.id)); if (d.open) draw(); }, () => {});
+}
+
 // ---------- notifications: what changed on my requests; the page checks once a minute ----------
 let bellTimer = null;
+// a notification is one sentence naming its request in (brackets) or “quotes”; pull the request out so the headline stays short
+// the kind sets the colour, the same words as the badges elsewhere: warn = waits for you, ok = done, err = sent back, info = the rest
+const noteKind = (t) => /ส่งกลับ/.test(t) ? ["err", "undo"] : /อนุมัติแล้ว|เสร็จสิ้น/.test(t) ? ["ok", "check"] : /รอตรวจสอบ|ได้รับมอบหมาย/.test(t) ? ["warn", "clock"] : ["info", "info"];
+function noteParts(text) {
+  const a = text.match(/^(.*?) \((.+)\)(?:: (.*))?$/);
+  if (a) return { head: a[1], where: a[2], note: a[3] || "" };
+  const b = text.match(/^(.*?)“(.+)”(.*)$/);
+  if (b) return { head: b[3].trim() || b[1].trim(), where: b[2], note: "" };
+  return { head: text, where: "", note: "" };
+}
+
 function mountBell() {
   clearInterval(bellTimer);
   const bell = document.getElementById("bell"), n = document.getElementById("bellN"), panel = document.getElementById("notes");
@@ -786,7 +1034,9 @@ function mountBell() {
   bell.onclick = act(async () => {
     if (!panel.hidden) { close(); return; }
     const r = await api("/notifications"), now = new Date().toISOString();
-    panel.replaceChildren(...(r.items.length ? r.items.map((it) => h("button", { type: "button", class: it.seen ? "" : "new", onclick: () => go(it.submission_id) }, it.text, h("small", {}, agoText(it.created, now))))
+    panel.replaceChildren(h("div", { class: "nh" }, "การแจ้งเตือน"), ...(r.items.length ? r.items.map((it) => { const t = noteParts(it.text), [kind, ic] = noteKind(it.text);
+      return h("button", { type: "button", class: (it.seen ? "" : "new ") + "k-" + kind, onclick: () => go(it.submission_id) }, h("span", { class: "dot", "aria-hidden": "true" }, icon(ic)),
+        h("span", { class: "nb" }, h("span", { class: "nt" }, t.head), t.where ? h("span", { class: "nc" }, t.where) : null, t.note ? h("span", { class: "nn" }, t.note) : null), h("time", {}, agoText(it.created, now))); })
       : [h("p", {}, "ยังไม่มีการแจ้งเตือน")]));
     panel.hidden = false; bell.setAttribute("aria-expanded", "true");
     if (r.unread) { await api("/notifications/seen", { method: "POST" }); count(0); }  // read once the list is open
@@ -868,26 +1118,34 @@ async function profileScreen() {
     field("ชื่อที่แสดง", name), field("เบอร์โทร", phone, "เจ้าหน้าที่ใช้ติดต่อเมื่อเอกสารต้องแก้ไข"), field("คณะ / หน่วยงาน", faculty),
     h("div", { class: "pfield" }, h("span", {}, "อีเมล / รหัสผู้ใช้"), h("b", {}, p.id), h("small", { class: "muted" }, "บทบาท: " + ROLE[p.role] + " · แก้ไขเองไม่ได้ ติดต่อเจ้าหน้าที่หากไม่ถูกต้อง")),
     h("div", { class: "actions" }, save, saved));
-  show(h("div", { class: "formbar" }, h("a", { class: "ghost", href: "/" }, "← กลับ")), h("h1", { class: "page-title" }, "โปรไฟล์ของฉัน"), info,
+  showRead(h("div", { class: "formbar" }, h("a", { class: "ghost", href: "/" }, "← กลับ")), h("h1", { class: "page-title" }, "โปรไฟล์ของฉัน"), info,
     p.role === "researcher" ? await lineCard() : null, h("div", { class: "actions" }, logout));
 }
 
-const doLogout = async () => { await api("/logout", { method: "POST" }); if (location.pathname !== "/") location.assign("/"); else start(); };
+const doLogout = async () => { await commitDelete(); await api("/logout", { method: "POST" }); if (location.pathname !== "/") location.assign("/"); else start(); };
 
 // ---------- start ----------
 async function boot() {
   removeChat();
-  openReq = null; homeFilter = "";  // a new login starts on the overview
+  openReq = history.state?.open || null; homeFilter = "";  // a new login starts on the overview; a refresh on a request page stays on it
   try { me = await api("/me"); } catch { me = null; }
   const logout = document.getElementById("logout");
   renderWho();
   logout.hidden = !me;
   document.getElementById("chatlink").hidden = !me || me.role !== "researcher";  // staff do not use the chat
   logout.onclick = doLogout;
+  palSubs = [];  // the palette must not show the previous person's requests
+  const find = document.getElementById("find");
+  find.hidden = !me; find.onclick = palette;
+  find.setAttribute("aria-keyshortcuts", MAC ? "Meta+K" : "Control+K");
+  document.getElementById("findKey").textContent = MAC ? "⌘K" : "Ctrl K";
   if (!me) { tab = "queue"; mountBell(); return loginScreen(); }  // the next staff member starts on the inbox
   if (location.pathname === "/profile") return profileScreen();  // no bell here: a notification opens a request, which lives on the home page
   mountBell();
   users = await api("/users");
+  const req = location.pathname.match(/^\/requests\/(\d+)$/);
+  if (req && me.role === "staff") return staffDetail(Number(req[1]));  // opened by address (refresh or a shared link)
+  if (req) history.replaceState({}, "", "/");  // researchers have their own request view on the home page
   await (me.role === "staff" ? staffHome : researcherHome)();
   if (me.role === "researcher") chatDrawer();
 }

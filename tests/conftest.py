@@ -19,8 +19,11 @@ def mock_content(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def _own_tracker_db(tmp_path, monkeypatch):
     """No test reads or writes the real tracker.db: it holds whatever was clicked in the UI (roles, demo people). A test that builds its own Tracker overrides this."""
-    from app.core import state
+    from app.core import auth, state
     from app.features.tracker import Tracker
+
+    monkeypatch.setattr(auth, "EXPOSED", False)  # a developer's .env may hold a public address; tests act as a local app
+    monkeypatch.setattr(auth, "PUBLIC_URL", "")
 
     tk = Tracker(tmp_path / "default-tracker.db")
     monkeypatch.setattr(state, "get_tracker", lambda: tk)

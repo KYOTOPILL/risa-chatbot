@@ -259,3 +259,24 @@ def test_update_live_edits_text_but_locks_step_count_once_used(tk):
     tk.update_live(v, [{**two[0], "title": "Fixed 2"}, two[1]])  # used: same count is fine
     with pytest.raises(ValueError):
         tk.update_live(v, two[:1])
+
+
+def test_line_only_gets_events_that_need_action(tk):
+    """Every event is saved in-app; only those asking someone to act are also pushed to LINE, to that person only."""
+    pushed = []
+    tk.on_notify = lambda t, who, text: pushed.append((who, text))
+    v = tk.create_type("CMU", [{"title": "S", "documents": ["A", "B"], "page": None, "unsure": False}, {"title": "T", "documents": [], "page": None, "unsure": False}], "")
+    tk.approve(v)
+    sid = tk.create_submission("T - r1", v, ["r1"], "s1", "s1")
+    assert pushed == []  # a new request is in-app only
+    ids = [tk.add_upload(sid, 0, d, f"{d}.pdf", f"/p/{d}.pdf", [], "screened") for d in "AB"]
+    for i in ids:
+        tk.send_upload(i, "r1")
+    assert [w for w, _ in pushed] == [["s1"]]  # two documents sent, one push to the staff in charge
+    tk.review_upload(ids[0], "s1", "return", [], "fix")
+    assert [w for w, _ in pushed][-1] == ["r1"] and "ส่งกลับ" in pushed[-1][1]
+    n = len(pushed)
+    tk.send_upload(tk.add_upload(sid, 0, "A", "A2.pdf", "/p/A2.pdf", [], "screened"), "r1")
+    tk.review_upload(ids[1], "s1", "approve", [], "")
+    assert len(pushed) == n  # an approval alone is in-app only
+    assert any("อนุมัติ" in r["text"] for r in tk.notifications("r1")["items"])

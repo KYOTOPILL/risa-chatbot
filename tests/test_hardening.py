@@ -24,10 +24,10 @@ def test_login_locks_after_five_wrong_tries_and_cookie_expires(monkeypatch):
     assert c.get("/api/track/me").status_code == 401
 
 
-def test_session_value_cannot_be_moved_to_another_user_or_expiry():
-    uid, exp, sig = auth.session_value("r1").split(".")
+def test_session_value_cannot_be_moved_to_another_user_or_time():
+    uid, start, exp, sig = auth.session_value("r1").split(".")
     c = TestClient(server.app)
-    for forged in (f"s1.{exp}.{sig}", f"r1.{int(exp) + 99999}.{sig}"):
+    for forged in (f"s1.{start}.{exp}.{sig}", f"r1.{int(start) - 99999}.{exp}.{sig}", f"r1.{start}.{int(exp) + 99999}.{sig}"):
         c.cookies.set("uid", forged)
         assert c.get("/api/track/me").status_code == 401
 

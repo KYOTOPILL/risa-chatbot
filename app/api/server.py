@@ -18,12 +18,16 @@ from app.features import downloads
 from app.rag import rag
 from app.core import state
 from app.features.tracker import Tracker
-from app.core.auth import User, current_user, require_researcher
+from app.core import config
+from app.core.auth import User, current_user, require_researcher, same_origin
 from app.core.config import CONTENT_DIR, ROOT
 
 log = logging.getLogger("chatbot")
 if not log.handlers:  # answer sources go here, never to the browser
     log.addHandler(logging.StreamHandler())
+_off = [f"RISA_PASSWORD_{i.upper()}" for i, u in config.MOCK_USERS.items() if config.EXPOSED and u["default"]]
+if _off:
+    log.warning("Demo logins are switched off because the app is reachable from outside (RISA_PUBLIC_URL or RISA_COOKIE_SECURE is set) and they still use the public demo password. Set %s in .env to turn one on.", ", ".join(_off))
 log.setLevel(logging.INFO)
 
 WEB = ROOT / "web"
@@ -52,13 +56,25 @@ class RevalidatingStatic(StaticFiles):
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.middleware("http")
+async def keep_session_alive(request: Request, call_next):
+    """auth.current_user leaves a fresh cookie in request.state when the person is using the app; it goes on the response here so streaming answers get it too."""
+    response = await call_next(request)
+    fresh = getattr(request.state, "new_session", None)
+    if fresh:
+        response.set_cookie("uid", fresh, httponly=True, samesite="lax", secure=config.COOKIE_SECURE, max_age=config.IDLE_SECONDS)
+    return response
+
+
 app.include_router(admin.router)
 app.include_router(tracker_api.router)
 app.include_router(line_bot.router)
 Tracker.on_notify = staticmethod(line_bot.alert)  # in-app notifications are also pushed to LINE
 
 
-@app.post("/api/chat")
+@app.post("/api/chat", dependencies=[Depends(same_origin)])
 def chat(body: ChatIn, request: Request, user: User = Depends(require_researcher)):
     history = [rag.Turn(t.role, t.content) for t in body.history]
     key = " ".join(body.message.split()).casefold() if not history else None
@@ -91,7 +107,7 @@ def _payload(message: str, reply: rag.Reply) -> dict:
     return {"text": reply.text, "files": files}
 
 
-@app.post("/api/chat/stream")
+@app.post("/api/chat/stream", dependencies=[Depends(same_origin)])
 def chat_stream(body: ChatIn, request: Request, user: User = Depends(require_researcher)):
     """Same answer as /api/chat, sent as JSON lines: {"status": text} while tools run, {"delta": text} while the answer is written ({"delta": null} = discard
     the text so far), then {"done": true, "text", "files"} with the final text, or {"error": text}."""
@@ -150,7 +166,8 @@ def download(doc_id: str):
 
 @app.get("/")
 @app.get("/profile")  # same page: home.js shows the profile when the path is /profile
-def home():
+@app.get("/requests/{sid}")  # and the request page when it is /requests/{id}
+def home(sid: int | None = None):
     return FileResponse(WEB / "home.html")
 
 

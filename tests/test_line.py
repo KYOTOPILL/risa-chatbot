@@ -183,8 +183,10 @@ def test_status_changes_are_pushed_to_the_researchers_line(env, monkeypatch):
     monkeypatch.setattr(line_bot, "_run", lambda f, *a: f(*a))  # no thread in tests
     link("r1", "Uline1")
     _new_request(tk, "r1")
+    assert not pushes(sent)  # a new request is only in-app: LINE carries the events that ask for action
+    tk.move_step(1, "s1", 1, "")  # the request finishes
     got = pushes(sent)
-    assert len(got) == 1 and got[0]["to"] == "Uline1" and "งานใหม่" in got[0]["messages"][0]["text"] and "https://risa.example" in got[0]["messages"][0]["text"]
+    assert len(got) == 1 and got[0]["to"] == "Uline1" and "เสร็จสิ้น" in got[0]["messages"][0]["text"] and "https://risa.example" in got[0]["messages"][0]["text"]
 
 
 def test_no_push_for_people_without_a_link_or_when_line_is_off(env, monkeypatch):

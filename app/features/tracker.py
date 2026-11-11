@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     seen INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('researcher', 'staff')),
     created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS user_events (id INTEGER PRIMARY KEY, at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, actor TEXT NOT NULL, target TEXT NOT NULL,
+    action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS line_links (line_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
 ROLES = {"researcher", "staff"}
@@ -126,11 +128,11 @@ class Tracker:
         with self._db() as db:
             db.executescript(SCHEMA)
             have = {r["name"] for r in db.execute("PRAGMA table_info(types)")}
-            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''"), ("category_id", "INTEGER"), ("pinned", "INTEGER NOT NULL DEFAULT 0"), ("audience", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
+            for col, ddl in (("open", "INTEGER NOT NULL DEFAULT 0"), ("owner_id", "TEXT NOT NULL DEFAULT ''"), ("category_id", "INTEGER"), ("pinned", "INTEGER NOT NULL DEFAULT 0"), ("audience", "TEXT NOT NULL DEFAULT ''"), ("owners", "TEXT NOT NULL DEFAULT ''")):  # databases made before posts existed
                 if col not in have:
                     db.execute(f"ALTER TABLE types ADD COLUMN {col} {ddl}")
             have = {r["name"] for r in db.execute("PRAGMA table_info(users)")}
-            for col, ddl in (("phone", "TEXT NOT NULL DEFAULT ''"), ("faculty", "TEXT NOT NULL DEFAULT ''"), ("avatar_color", "TEXT NOT NULL DEFAULT ''"), ("avatar", "BLOB"), ("status", "TEXT NOT NULL DEFAULT 'active'"), ("first_login", "TEXT")):  # profile and access columns, added to old databases
+            for col, ddl in (("phone", "TEXT NOT NULL DEFAULT ''"), ("faculty", "TEXT NOT NULL DEFAULT ''"), ("avatar_color", "TEXT NOT NULL DEFAULT ''"), ("avatar", "BLOB"), ("status", "TEXT NOT NULL DEFAULT 'active'"), ("first_login", "TEXT"), ("session_epoch", "INTEGER NOT NULL DEFAULT 0")):  # profile and access columns, added to old databases
                 if col not in have:
                     db.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
             # ponytail: demo accounts seeded so the mock login works; drop this line once the demo accounts are replaced by staff added through the ผู้ใช้ tab
@@ -217,11 +219,13 @@ class Tracker:
             db.execute("DELETE FROM types WHERE id = ?", (type_id,))
         return [r["source_file"] for r in rows]
 
-    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id, t.category_id AS category_id, t.pinned AS pinned, t.audience AS audience FROM versions v JOIN types t ON t.id = v.type_id"
+    _VERSION_SQL = "SELECT v.*, t.name AS type_name, t.open AS open, t.owner_id AS owner_id, t.owners AS owners, t.category_id AS category_id, t.pinned AS pinned, t.audience AS audience FROM versions v JOIN types t ON t.id = v.type_id"
 
     @staticmethod
     def _version(row) -> dict:
-        return {**dict(row), "steps": json.loads(row["steps"]), "audience": json.loads(row["audience"]) if row["audience"] else None}  # None = every researcher
+        owners = json.loads(row["owners"]) if row["owners"] else [row["owner_id"]] if row["owner_id"] else []
+        return {**{k: v for k, v in dict(row).items() if k != "owners"}, "steps": json.loads(row["steps"]), "owner_ids": owners,
+                "audience": json.loads(row["audience"]) if row["audience"] else None}  # None = every researcher
 
     def get_version(self, version_id: int) -> dict | None:
         with self._db() as db:
@@ -325,12 +329,31 @@ class Tracker:
                 raise KeyError(type_id)
 
     # ---- posts: an open type is listed for researchers, who start their own request; the owner is staff in charge of those ----
-    def set_type_open(self, type_id: int, is_open: bool, owner_id: str | None = None) -> None:
+    def set_type_open(self, type_id: int, is_open: bool, owners: list[str] | str | None = None) -> None:
+        """Open or close a post. `owners` (one id or a list; None keeps the current ones) are the staff the new requests rotate between."""
         with self._db() as db:
-            if owner_id is None:
+            if owners is None:
                 db.execute("UPDATE types SET open = ? WHERE id = ?", (int(is_open), type_id))
             else:
-                db.execute("UPDATE types SET open = ?, owner_id = ? WHERE id = ?", (int(is_open), owner_id, type_id))
+                ids = list(dict.fromkeys([owners] if isinstance(owners, str) else owners))
+                db.execute("UPDATE types SET open = ?, owner_id = ?, owners = ? WHERE id = ?", (int(is_open), ids[0], json.dumps(ids), type_id))
+
+    def pick_owner(self, type_id: int) -> str:
+        """The staff in charge of the next request of this post: of the active staff set on it, the one with the fewest unfinished requests, ties to whoever was given one longest ago."""
+        with self._db() as db:
+            row = db.execute("SELECT owner_id, owners FROM types WHERE id = ?", (type_id,)).fetchone()
+        ids = [i for i in (json.loads(row["owners"]) if row["owners"] else [row["owner_id"]]) if i and self.role_of(i) == "staff"]
+        if len(ids) < 2:
+            return ids[0] if ids else row["owner_id"]
+        with self._db() as db:
+            subs = db.execute(f"SELECT s.id, s.staff_id, s.current_step, v.steps, v.type_id FROM submissions s JOIN versions v ON v.id = s.version_id WHERE s.staff_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        open_n = {i: 0 for i in ids}
+        last = {i: 0 for i in ids}
+        for r in subs:
+            open_n[r["staff_id"]] += r["current_step"] < len(json.loads(r["steps"]))
+            if r["type_id"] == type_id:
+                last[r["staff_id"]] = max(last[r["staff_id"]], r["id"])
+        return min(ids, key=lambda i: (open_n[i], last[i]))
 
     # ---- users: id (a CMU email once real login lands), display name, role. No passwords here. ----
     def get_user(self, user_id: str, active_only: bool = False) -> dict | None:
@@ -406,6 +429,29 @@ class Tracker:
             items = [{"id": r["id"], "name": r["name"], "role": r["role"], "active": r["status"] == "active", "joined": bool(r["joined"])} for r in rows]
             counts = {k: db.execute(f"SELECT COUNT(*) FROM users WHERE {c}").fetchone()[0] for k, c in USER_VIEWS.items()}
         return {"items": items, "total": total, "counts": counts}
+
+    # ---- sessions: the cookie is signed together with this number, so raising it ends every session of that person ----
+    def login_row(self, user_id: str) -> dict | None:
+        """The active person with the number their session cookie must have been signed with; None for an unknown or disabled id."""
+        with self._db() as db:
+            row = db.execute("SELECT id, name, role, session_epoch FROM users WHERE id = ? AND status = 'active'", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def end_sessions(self, user_id: str) -> None:
+        with self._db() as db:
+            db.execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?", (user_id,))
+
+    # ---- audit trail of who gave or took access ----
+    def log_user_event(self, actor: str, target: str, action: str, detail: str = "") -> None:
+        with self._db() as db:
+            db.execute("INSERT INTO user_events (actor, target, action, detail) VALUES (?, ?, ?, ?)", (actor, target, action, detail))
+
+    def user_events(self, offset: int = 0, limit: int = 50) -> dict:
+        with self._db() as db:
+            total = db.execute("SELECT COUNT(*) FROM user_events").fetchone()[0]
+            rows = db.execute("SELECT e.id, e.at, e.actor, a.name AS actor_name, e.target, t.name AS target_name, e.action, e.detail FROM user_events e "
+                              "LEFT JOIN users a ON a.id = e.actor LEFT JOIN users t ON t.id = e.target ORDER BY e.id DESC LIMIT ? OFFSET ?", (limit, offset))
+            return {"items": [dict(r) for r in rows], "total": total}
 
     # ---- profile: what the person edits about themselves (never id or role) ----
     def get_profile(self, user_id: str) -> dict | None:
@@ -540,11 +586,12 @@ class Tracker:
     # ---- notifications: what changed on a request, for each person involved except the one who did it ----
     on_notify = None  # optional hook (tracker, user_ids, text) called after notifications are saved; the web layer sets it to push to LINE
 
-    def _notify(self, sid: int, text: str, to: list[str], actor: str | None) -> None:
+    def _notify(self, sid: int, text: str, to: list[str], actor: str | None, line: bool = False) -> None:
+        """Save an in-app notification for each recipient (never the actor). Only `line=True` ones, the events that ask the person to act, are also pushed to their LINE."""
         who = [u for u in dict.fromkeys(to) if u != actor]
         with self._db() as db:
             db.executemany("INSERT INTO notifications (user_id, submission_id, text) VALUES (?, ?, ?)", [(u, sid, text) for u in who])
-        if who and self.on_notify:
+        if who and line and self.on_notify:
             try:
                 self.on_notify(self, who, text)
             except Exception:  # an alert that fails must never undo the change that caused it
@@ -574,7 +621,7 @@ class Tracker:
         with self._db() as db:
             if not db.execute("UPDATE submissions SET staff_id = ? WHERE id = ?", (staff_id, sid)).rowcount:
                 raise ValueError("no such submission")
-        self._notify(sid, f"คุณได้รับมอบหมายให้ดูแลงาน “{self._title_staff(sid)[0]}”", [staff_id], actor)
+        self._notify(sid, f"คุณได้รับมอบหมายให้ดูแลงาน “{self._title_staff(sid)[0]}”", [staff_id], actor, line=True)
 
     def move_step(self, sid: int, staff_id: str, to_step: int, note: str = "") -> None:
         """Only the staff in charge may move; to_step == step_count means completed."""
@@ -589,7 +636,7 @@ class Tracker:
             db.execute("UPDATE submissions SET current_step = ? WHERE id = ?", (to_step, sid))
             db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
                        (sid, row["current_step"], to_step, staff_id, note))
-        self._notify(sid, f"งาน “{row['title']}” ย้ายไปขั้นตอนที่ {to_step + 1}" if to_step < len(json.loads(row["steps"])) else f"งาน “{row['title']}” ดำเนินการเสร็จสิ้น", self._researchers(sid), staff_id)
+        self._notify(sid, f"งาน “{row['title']}” ย้ายไปขั้นตอนที่ {to_step + 1}" if to_step < len(json.loads(row["steps"])) else f"งาน “{row['title']}” ดำเนินการเสร็จสิ้น", self._researchers(sid), staff_id, line=True)
 
     # ---- uploads ----
     def add_upload(self, sid: int, step_index: int, doc_name: str, filename: str, path: str, findings: list | None, status: str, answers: list | None = None) -> int:
@@ -618,7 +665,11 @@ class Tracker:
             raise ValueError("upload cannot be sent")
         up = self.get_upload(upload_id)
         title, staff = self._title_staff(up["submission_id"])
-        self._notify(up["submission_id"], f"{up['doc_name']} ส่งแล้ว รอตรวจสอบ ({title})", [staff], actor)
+        with self._db() as db:  # one bell row per request: documents sent while the last one is still unread fold into it; LINE once per batch too
+            waiting = db.execute("SELECT COUNT(*) FROM uploads WHERE submission_id = ? AND status = 'sent'", (up["submission_id"],)).fetchone()[0]
+            db.execute("DELETE FROM notifications WHERE user_id = ? AND submission_id = ? AND seen = 0 AND text LIKE '%รอตรวจสอบ (%'", (staff, up["submission_id"]))
+        what = f"{up['doc_name']} ส่งแล้ว" if waiting == 1 else f"ส่งแล้ว {waiting} เอกสาร"
+        self._notify(up["submission_id"], f"{what} รอตรวจสอบ ({title})", [staff], actor, line=waiting == 1)
 
     def withdraw_upload(self, upload_id: int) -> None:
         """Take a sent document back from the staff queue. It returns to the state before sending, so it can be edited and sent again."""
@@ -673,7 +724,7 @@ class Tracker:
             raise ValueError("upload is not waiting for review")
         title = self._title_staff(up["submission_id"])[0]
         self._notify(up["submission_id"], (f"{up['doc_name']} อนุมัติแล้ว ({title})" if decision == "approve" else f"{up['doc_name']} ถูกส่งกลับให้แก้ไข ({title})" + (f": {note}" if note else "")),
-                     self._researchers(up["submission_id"]), staff_id)
+                     self._researchers(up["submission_id"]), staff_id, line=decision != "approve")  # an approval is only in-app; the step move that follows is the LINE one
         if decision != "approve":
             return False
         steps = json.loads(row["steps"])
@@ -687,6 +738,6 @@ class Tracker:
                     db.execute("INSERT INTO step_events (submission_id, from_step, to_step, staff_id, note) VALUES (?, ?, ?, ?, ?)",
                                (up["submission_id"], cur, cur + 1, staff_id, "auto: all documents approved"))
             if moved:
-                self._notify(up["submission_id"], f"งาน “{title}” ไปขั้นตอนถัดไปแล้ว" if cur + 1 < len(steps) else f"งาน “{title}” ดำเนินการเสร็จสิ้น", self._researchers(up["submission_id"]), staff_id)
+                self._notify(up["submission_id"], f"งาน “{title}” ไปขั้นตอนถัดไปแล้ว" if cur + 1 < len(steps) else f"งาน “{title}” ดำเนินการเสร็จสิ้น", self._researchers(up["submission_id"]), staff_id, line=True)
             return bool(moved)
         return False

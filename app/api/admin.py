@@ -3,7 +3,6 @@ import re
 import shutil
 import threading
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ from app.core.config import CONTENT_DIR, SUPPORTED_EXTS
 from app.rag.docmeta import SHAREABLE, doc_meta
 from app.rag.ingest import build_index, summarize
 from app.rag.store import display_summary
-from app.core.auth import require_staff
+from app.core.auth import require_staff, same_origin
 
 MAX_BYTES = 25 * 1024 * 1024
 BAD_CATEGORY = re.compile(r"[/\\\x00-\x1f]")
@@ -21,10 +20,7 @@ REINDEX_DELAY = 2.5  # seconds of quiet after the last change before the index r
 
 
 def require_admin(request: Request, _staff=Depends(require_staff)) -> None:
-    host = request.headers.get("host", "")
-    origin = request.headers.get("origin")  # browsers send it on cross-site form posts, which carry the cookie
-    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and urlsplit(origin).netloc != host:
-        raise HTTPException(403, "cross-site request blocked")
+    same_origin(request)
     # ponytail: the mock login has no password, so anyone who can reach the site can become staff; real CMU login replaces auth.current_user
 
 

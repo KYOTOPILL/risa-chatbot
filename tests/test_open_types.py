@@ -210,3 +210,29 @@ def test_audience_rules(env):
     assert s1.put(f"/api/track/types/{tid}/audience", json={"user_ids": ["nobody"]}).status_code == 400
     assert s1.put("/api/track/types/9999/audience", json={"user_ids": ["r1"]}).status_code == 404
     assert client("r1").put(f"/api/track/types/{tid}/audience", json={"user_ids": ["r1"]}).status_code == 403
+
+
+def test_several_staff_on_a_post_take_new_requests_in_turn(env):
+    tk, tid = env
+    got = publish(client("s1"), tid, owner_ids=["s1", "s2"])
+    assert got.status_code == 200 and got.json()["owner_ids"] == ["s1", "s2"]
+    assert client("r1").get("/api/track/open-types").json()[0]["owner_name"] == "Malee, Anan"
+    owners = []
+    for uid in ("r1", "r2"):  # each new request goes to the one with the fewer unfinished requests
+        c = client(uid)
+        owners.append(c.get(f"/api/track/submissions/{c.post(f'/api/track/open-types/{tid}/start').json()['id']}").json()["staff_id"])
+    assert sorted(owners) == ["s1", "s2"]
+    tk.add_users(["demo.x@cmu.ac.th"], "researcher")
+    assert tk.pick_owner(tid) in ("s1", "s2")
+
+
+def test_pick_owner_prefers_the_lighter_load_and_skips_disabled_staff(env):
+    tk, tid = env
+    v = tk.list_types()[0]["id"]
+    publish(client("s1"), tid, owner_ids=["s1", "s2"])
+    tk.create_submission("a", v, ["r1"], "s1")  # s1 already has one unfinished
+    assert tk.pick_owner(tid) == "s2"
+    tk.set_active("s2", False)
+    assert tk.pick_owner(tid) == "s1"  # a disabled staff member is not chosen
+    assert publish(client("s1"), tid, owner_ids=["s1", "r1"]).status_code == 400  # every one must be staff
+    assert publish(client("s1"), tid, owner_ids=[]).status_code == 200  # empty falls back to whoever publishes

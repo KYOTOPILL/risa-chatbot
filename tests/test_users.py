@@ -112,6 +112,7 @@ def test_avatar_accepts_real_images_only_and_can_be_removed(tmp_path, monkeypatc
 def test_profile_page_is_served_and_unlink_cuts_every_line_link(tmp_path, monkeypatch):
     tk, c = _client(tmp_path, monkeypatch)
     assert c.get("/profile").status_code == 200 and b"RiSA" in c.get("/profile").content
+    assert c.get("/requests/12").status_code == 200 and b"RiSA" in c.get("/requests/12").content and c.get("/requests/abc").status_code == 422  # the request page is the same single page app
     tk.link_line("U1", "r1"); tk.link_line("U2", "r2")
     assert c.post("/api/line/unlink").status_code == 200
     assert not tk.has_line("r1") and tk.has_line("r2")
@@ -242,3 +243,135 @@ def test_pasted_people_may_carry_a_name_and_the_preview_says_what_will_happen(tm
     assert c.post("/api/track/users/preview", json={"emails": "   "}).status_code == 400
     r = TestClient(server.app); r.post("/api/track/login", json=CREDS["r1"])
     assert r.post("/api/track/users/preview", json={"emails": "a@cmu.ac.th"}).status_code == 403
+
+
+def test_demo_accounts_on_the_public_demo_password_are_off_when_the_app_is_exposed(tmp_path, monkeypatch):
+    from app.core import auth
+    from app.core.config import MOCK_USERS
+    tk, _ = _client(tmp_path, monkeypatch, "s1")
+    tk.add_users(["me@cmu.ac.th"], "staff")
+    def login(who):
+        return TestClient(server.app).post("/api/track/login", json=who).status_code
+    monkeypatch.setattr(auth, "EXPOSED", True)
+    assert login(CREDS["s1"]) == 401 and login(CREDS["r1"]) == 401  # still the public password: off
+    monkeypatch.setitem(MOCK_USERS["s1"], "default", False)  # RISA_PASSWORD_S1 was set in .env
+    assert login(CREDS["s1"]) == 200 and login(CREDS["r1"]) == 401
+    monkeypatch.setattr(auth, "DEV_LOGIN", ("me@cmu.ac.th", "pw"))
+    assert login({"username": "me@cmu.ac.th", "password": "pw"}) == 200  # the dev login has its own password from .env
+
+
+def test_a_researcher_gets_only_the_staff_list_not_the_directory(tmp_path, monkeypatch):
+    tk, s = _client(tmp_path, monkeypatch, "s1")
+    tk.add_users(["other@cmu.ac.th"], "researcher")
+    r = TestClient(server.app); r.post("/api/track/login", json=CREDS["r1"])
+    got = r.get("/api/track/users").json()
+    assert got and all(u["role"] == "staff" for u in got)  # no researcher, so no other researcher's email
+    assert {u["id"] for u in s.get("/api/track/users").json()} >= {"r1", "r2", "other@cmu.ac.th", "s1"}  # staff keep the full list
+
+
+def test_cross_site_posts_with_the_login_cookie_are_blocked_everywhere(tmp_path, monkeypatch):
+    from app.core import auth
+    tk, c = _client(tmp_path, monkeypatch, "s1")
+    evil = {"Origin": "https://evil.example"}
+    assert c.put("/api/track/profile", json={"name": "X"}, headers=evil).status_code == 403
+    assert c.post("/api/track/users/add", json={"emails": "a@cmu.ac.th"}, headers=evil).status_code == 403
+    assert c.post("/api/track/logout", headers=evil).status_code == 403
+    r = TestClient(server.app); r.post("/api/track/login", json=CREDS["r1"])
+    assert r.post("/api/line/code", headers=evil).status_code == 403 and r.post("/api/line/unlink", headers=evil).status_code == 403
+    assert r.post("/api/chat", json={"message": "x", "history": []}, headers=evil).status_code == 403
+    assert c.get("/api/track/me", headers=evil).status_code == 200  # reads are not checked
+    assert c.put("/api/track/profile", json={"name": "Same Site"}, headers={"Origin": "http://testserver"}).status_code == 200  # Origin = Host
+    assert c.put("/api/track/profile", json={"name": "No Origin"}).status_code == 200  # scripts and tests send none
+    monkeypatch.setattr(auth, "PUBLIC_URL", "https://risa.example.com")
+    assert c.put("/api/track/profile", json={"name": "Via Tunnel"}, headers={"Origin": "https://risa.example.com"}).status_code == 200  # a proxy that rewrites Host
+    assert c.put("/api/track/profile", json={"name": "Proxy"}, headers={"Origin": "https://p.example", "X-Forwarded-Host": "p.example"}).status_code == 200
+    assert c.post("/api/line/webhook", content=b"{}", headers=evil).status_code in (400, 404)  # LINE's own webhook is not Origin-checked (it has its own signature)
+
+
+def test_access_changes_are_written_to_an_audit_trail_staff_can_read(tmp_path, monkeypatch):
+    tk, c = _client(tmp_path, monkeypatch, "s1")
+    c.post("/api/track/users/add", json={"emails": "a@cmu.ac.th\nb@cmu.ac.th", "role": "researcher"})
+    c.put("/api/track/users/a@cmu.ac.th/role", json={"role": "staff"})
+    c.put("/api/track/users/a@cmu.ac.th/role", json={"role": "staff"})  # no change: not logged again
+    c.put("/api/track/users/b@cmu.ac.th/active", json={"active": False})
+    c.put("/api/track/users/b@cmu.ac.th/active", json={"active": True})
+    c.put("/api/track/users/s1/active", json={"active": False})  # refused: not logged
+    ev = c.get("/api/track/users/events").json()
+    assert ev["total"] == 5 and [(e["action"], e["target"], e["detail"]) for e in ev["items"]] == [
+        ("enable", "b@cmu.ac.th", ""), ("disable", "b@cmu.ac.th", ""), ("role", "a@cmu.ac.th", "staff"), ("add", "b@cmu.ac.th", "researcher"), ("add", "a@cmu.ac.th", "researcher")]
+    assert ev["items"][0]["actor"] == "s1" and ev["items"][0]["actor_name"] == "Malee" and ev["items"][0]["target_name"] == "b"
+    assert len(c.get("/api/track/users/events?limit=2&offset=4").json()["items"]) == 1
+    r = TestClient(server.app); r.post("/api/track/login", json=CREDS["r1"])
+    assert r.get("/api/track/users/events").status_code == 403
+
+
+def test_logout_ends_the_session_for_good_even_for_a_copied_cookie(tmp_path, monkeypatch):
+    tk, c = _client(tmp_path, monkeypatch, "r1")
+    copy = c.cookies.get("uid")
+    other = TestClient(server.app); other.post("/api/track/login", json=CREDS["r1"])  # a second device
+    assert c.post("/api/track/logout").status_code == 200 and c.get("/api/track/me").status_code == 401
+    thief = TestClient(server.app); thief.cookies.set("uid", copy)
+    assert thief.get("/api/track/me").status_code == 401  # the copied cookie is dead
+    assert other.get("/api/track/me").status_code == 401  # logging out leaves no device logged in
+    assert c.post("/api/track/login", json=CREDS["r1"]).status_code == 200 and c.get("/api/track/me").status_code == 200  # a new login works
+    assert TestClient(server.app).post("/api/track/logout").status_code == 200  # nobody logged in: harmless
+
+
+def test_one_address_is_locked_after_many_wrong_logins_across_usernames(tmp_path, monkeypatch):
+    from app.core import auth
+    _client(tmp_path, monkeypatch, "r1")
+    auth._fails.clear()
+    c = TestClient(server.app)
+    codes = [c.post("/api/track/login", json={"username": f"user{i}", "password": "x"}).status_code for i in range(32)]
+    assert codes[:30] == [401] * 30 and codes[30:] == [429, 429]  # every name tried once, so no single name was locked
+    assert c.post("/api/track/login", json=CREDS["r1"]).status_code == 429  # even the right password waits
+    auth._fails.clear()
+
+
+def test_wrong_link_codes_from_many_line_accounts_share_one_cap(tmp_path, monkeypatch):
+    from app.core import auth
+    from app.features import line_bot
+    tk, _ = _client(tmp_path, monkeypatch, "r1")
+    auth._fails.clear()
+    msgs = [line_bot._link(f"U{i}", "000000") for i in range(32)]
+    assert msgs[:30] == [line_bot.BAD_CODE] * 30 and msgs[30:] == [line_bot.LOCKED] * 2
+    auth._fails.clear()
+
+
+def test_session_ends_after_30_idle_minutes_but_not_while_the_person_keeps_working(tmp_path, monkeypatch):
+    import time
+    from app.core import auth
+    auth._fails.clear()
+    t = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: t[0])
+    tk, c = _client(tmp_path, monkeypatch, "r1")
+    minute = 60
+    def at(minutes):
+        t[0] += minutes * minute
+        return c.get("/api/track/me").status_code
+    assert at(20) == 200 and at(20) == 200 and at(20) == 200  # an hour of use, never 30 minutes idle: still in
+    assert at(31) == 401  # 31 minutes with no use: out
+    assert c.post("/api/track/login", json=CREDS["r1"]).status_code == 200  # a new login works
+
+    # the bell's own polling is not use: it must not keep an unattended page logged in
+    assert c.get("/api/track/me").status_code == 200
+    for _ in range(3):
+        t[0] += 20 * minute
+        assert c.get("/api/track/notifications").status_code in (200, 401)
+    t[0] += 1 * minute
+    assert c.get("/api/track/me").status_code == 401  # 61 minutes since the last real request
+
+    # and a login cannot be stretched past 8 hours by staying active
+    auth._fails.clear()
+    assert c.post("/api/track/login", json=CREDS["r1"]).status_code == 200
+    codes = [at(20) for _ in range(24)]  # 8 hours in 20-minute steps
+    assert 401 in codes and codes[0] == 200
+    assert codes.index(401) >= 23  # about 8 h after the login, not before
+
+
+def test_idle_limit_is_set_in_minutes_and_the_cookie_lasts_that_long(tmp_path, monkeypatch):
+    from app.core import auth, config
+    assert auth.IDLE_SECONDS == config.IDLE_SECONDS == 30 * 60  # RISA_IDLE_MINUTES default
+    tk, _ = _client(tmp_path, monkeypatch, "r1")
+    r = TestClient(server.app).post("/api/track/login", json=CREDS["r1"])
+    assert "Max-Age=1800" in r.headers["set-cookie"]
